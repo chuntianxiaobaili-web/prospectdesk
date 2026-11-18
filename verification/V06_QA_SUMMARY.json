@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "productName": "客拓工作台 ProspectDesk",
+  "version": "0.6.0",
+  "kind": "frozen-program-verification-summary",
+  "verifiedAt": "2026-11-18T09:41:38.055Z",
+  "tests": {
+    "total": 619,
+    "passed": 619,
+    "failed": 0,
+    "skipped": 0
+  },
+  "syntaxFilesChecked": 34,
+  "skillsChecked": 5,
+  "packageExportModulesChecked": 14,
+  "priorDocumentationLinksChecked": 30,
+  "programChangedForProductIntroduction": false,
+  "liveAcceptance": {
+    "sent": 20,
+    "originalDraftsConfirmedRemoved": 20,
+    "duplicateSends": 0,
+    "report": "../docs/TEST_RESULTS_V06.zh-CN.md",
+    "data": "../docs/LIVE_ACCEPTANCE_V06.json"
+  },
+  "notLiveTested": [
+    "yandex-mail-sending-in-v06",
+    "one-and-five-hour-command-cutoffs",
+    "continuous-eight-hour-reminder"
+  ],
+  "notes": [
+    "Program tests use synthetic data and are separate from live mailbox counts.",
+    "This documentation update preserves the tested program and technical identifiers.",
+    "The public repository starts with a clean package snapshot; its own Git history excludes the private workspace."
+  ],
+  "sourcePublication": {
+    "method": "clean-package-snapshot",
+    "privateWorkspaceHistoryIncluded": false,
+    "programVersion": "0.6.0",
+    "sourceIntegrityFile": "../SHA256SUMS.json"
+  }
+}

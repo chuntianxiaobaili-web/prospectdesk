@@ -1,0 +1,48 @@
+{
+  "brand": {
+    "name": "REPLACE_WITH_YOUR_BRAND",
+    "products": [
+      "commercial furniture"
+    ],
+    "verifiedFacts": [],
+    "unknowns": [
+      "price",
+      "MOQ",
+      "inventory",
+      "lead time",
+      "certifications"
+    ],
+    "evidenceSources": []
+  },
+  "research": {
+    "industry": "commercial furniture",
+    "products": [
+      "contract seating",
+      "restaurant tables"
+    ],
+    "buyerTypes": [
+      "commercial furniture distributors",
+      "hospitality procurement teams"
+    ],
+    "regions": [
+      "United Kingdom",
+      "Australia"
+    ],
+    "targetCount": 100,
+    "exclusions": []
+  },
+  "researchModel": {
+    "provider": "REPLACE_WITH_CONFIGURED_PROVIDER",
+    "model": "REPLACE_WITH_EXACT_RESEARCH_MODEL_ID"
+  },
+  "draftModel": {
+    "provider": "REPLACE_WITH_CONFIGURED_PROVIDER",
+    "model": "REPLACE_WITH_EXACT_DRAFT_MODEL_ID"
+  },
+  "accountId": "REPLACE_WITH_VERIFIED_MAILBOX_ACCOUNT",
+  "approvalMaxAgeSeconds": 86400,
+  "minimumIntervalSeconds": 180,
+  "draftingPolicy": {
+    "mode": "product-evidence-review"
+  }
+}

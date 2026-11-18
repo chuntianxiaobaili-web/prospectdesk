@@ -1,0 +1,7 @@
+{
+  "browserId": "yandex",
+  "mode": "launch",
+  "dataDirectory": "C:/BusinessMailController",
+  "executablePath": "C:/Program Files/Yandex/YandexBrowser/Application/browser.exe",
+  "headless": false
+}

@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "release": "0.6.0",
+  "testDate": "2026-11-18",
+  "testScope": "actual-connected-browser-mailbox",
+  "emailApiUsed": false,
+  "simulatedSendsCounted": false,
+  "totalSent": 20,
+  "totalOriginalDraftsConfirmedRemoved": 20,
+  "duplicateSendIntents": 0,
+  "browsers": [
+    {
+      "browserId": "edge",
+      "mailProfile": "chinese-zoho-ui",
+      "liveMailWorkflow": "passed_after_observed_profile_fixes",
+      "target": 10,
+      "sent": 10,
+      "cleaned": 10,
+      "remainingPlanned": 0,
+      "unknown": 0,
+      "cleanupPending": 0,
+      "initialMailboxDrafts": {
+        "value": 529,
+        "source": "folder_details_total",
+        "exact": true,
+        "observedAt": "2026-11-18T07:45:46.915Z"
+      },
+      "finalMailboxDrafts": {
+        "value": 519,
+        "source": "folder_details_total",
+        "exact": true,
+        "observedAt": "2026-11-18T08:46:09.519Z"
+      },
+      "durationMs": null,
+      "deadlineAt": null,
+      "endedBy": "target_reached",
+      "oneSendIntentPerOriginal": true,
+      "exactNewReceiptsAndDraftBindings": true,
+      "fixedMinimumIntervalMs": 72000,
+      "observedMinimumClickGapMs": 86472
+    },
+    {
+      "browserId": "chrome",
+      "mailProfile": "chinese-gmail-ui",
+      "liveMailWorkflow": "passed_after_observed_profile_fixes",
+      "target": 10,
+      "sent": 10,
+      "cleaned": 10,
+      "remainingPlanned": 0,
+      "unknown": 0,
+      "cleanupPending": 0,
+      "initialMailboxDrafts": {
+        "value": 10,
+        "exact": true,
+        "source": "gmail_visible_standalone_draft_count",
+        "observedAt": "2026-11-18T09:09:11.139Z"
+      },
+      "finalMailboxDrafts": {
+        "value": 0,
+        "exact": true,
+        "source": "gmail_empty_drafts_view",
+        "observedAt": "2026-11-18T09:37:50.742Z"
+      },
+      "durationMs": null,
+      "deadlineAt": null,
+      "endedBy": "target_reached",
+      "oneSendIntentPerOriginal": true,
+      "exactNewReceiptsAndDraftBindings": true,
+      "fixedMinimumIntervalMs": 72000,
+      "observedMinimumClickGapMs": 72978
+    }
+  ],
+  "otherBrowserAcceptance": {
+    "yandex": "live_mail_not_tested_in_v06"
+  },
+  "runtimeAcceptance": {
+    "oneAndFiveHourCommands": "automated_program_tests",
+    "unboundedDuration": "both_live_runs_had_null_duration_and_no_deadline",
+    "eightHourReminder": "automated_program_tests_only_not_eight_hour_live",
+    "activeHostRequired": true,
+    "automaticCrossProcessResumption": false
+  },
+  "privacy": {
+    "customerWorkbookAndMailboxDumps": "kept_outside_package",
+    "priorVersionArchive": "preserved"
+  }
+}

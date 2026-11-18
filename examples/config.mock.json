@@ -1,0 +1,23 @@
+{
+  "brand": {
+    "name": "Synthetic brand",
+    "products": [
+      "artificial flowers"
+    ],
+    "verifiedFacts": [
+      "Synthetic test data only"
+    ],
+    "unknowns": [
+      "price",
+      "inventory",
+      "lead time"
+    ]
+  },
+  "accountId": "mock@example.test",
+  "draftModel": {
+    "provider": "mock",
+    "model": "synthetic-high"
+  },
+  "approvalMaxAgeSeconds": 86400,
+  "minimumIntervalSeconds": 180
+}

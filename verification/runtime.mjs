@@ -1,0 +1,10 @@
+import {createRequire} from 'node:module';
+import path from 'node:path';
+import {pathToFileURL} from 'node:url';
+const require=createRequire(process.env.HARNESS_NODE_MODULES ? path.join(path.resolve(process.env.HARNESS_NODE_MODULES),'__verification__.cjs') : import.meta.url);
+const moduleOf=async name=>import(pathToFileURL(require.resolve(name)).href);
+export const {Context}=await moduleOf('@deepseek-ai/cordis');
+export const {default:SystemPrompt}=await moduleOf('@deepseek-ai/dsh-system-prompt');
+export const {default:Tools}=await moduleOf('@deepseek-ai/dsh-tools');
+export const {default:LlmRuntime,LlmAdapter}=await moduleOf('@deepseek-ai/dsh-llm');
+export const Llm=LlmRuntime;

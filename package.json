@@ -1,0 +1,53 @@
+{
+  "name": "@fsarcan/harness-sales-workflow",
+  "version": "0.6.0",
+  "description": "Harness B2B research, approved drafting and browser-mail session workflow",
+  "type": "module",
+  "main": "./src/plugin.js",
+  "exports": {
+    ".": "./src/plugin.js",
+    "./core": "./src/workflow.js",
+    "./mock": "./src/mock.js",
+    "./browser": "./src/local-browser.js",
+    "./browser-mail": "./src/browser-mail/index.mjs",
+    "./browser-mail/edge": "./src/browser-mail/edge.mjs",
+    "./browser-mail/chrome": "./src/browser-mail/chrome.mjs",
+    "./browser-mail/yandex": "./src/browser-mail/yandex.mjs",
+    "./browser-mail/connection": "./src/browser-mail/connection.mjs",
+    "./browser-mail/approved-draft-handoff": "./src/browser-mail/approved-draft-handoff.mjs",
+    "./browser-mail/cua-draft-writer": "./src/browser-mail/cua-draft-writer.mjs",
+    "./browser-mail/gmail": "./src/browser-mail/gmail-adapter.mjs",
+    "./browser-mail/gmail-draft-writer": "./src/browser-mail/gmail-draft-writer.mjs",
+    "./browser-mail/work-duration": "./src/browser-mail/work-duration.mjs"
+  },
+  "scripts": {
+    "test": "node --test",
+    "demo": "node examples/demo.js",
+    "check": "node --check src/plugin.js && node --check src/workflow.js && node --check src/browser-mail/service.mjs && node --check src/browser-mail/index.mjs && node --check src/browser-mail/connection.mjs && node --check src/browser-mail/chromium-tab.mjs && node --check src/browser-mail/approved-draft-handoff.mjs && node --check src/browser-mail/cua-draft-writer.mjs",
+    "local": "node src/local-app.js",
+    "browser:edge": "node src/browser-mail/desktop-cli.mjs open --browser edge",
+    "browser:chrome": "node src/browser-mail/desktop-cli.mjs open --browser chrome",
+    "browser:yandex": "node src/browser-mail/desktop-cli.mjs open --browser yandex"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "files": [
+    "src",
+    "examples",
+    "docs",
+    "README.zh-CN.md",
+    "skills",
+    "test",
+    "verification",
+    "windows",
+    "package-lock.json",
+    "DEEPSEEK_WINDOWS_TEST_HANDOFF.md",
+    ".gitignore",
+    "SHA256SUMS.json"
+  ],
+  "dependencies": {
+    "playwright": "1.64.1"
+  }
+}

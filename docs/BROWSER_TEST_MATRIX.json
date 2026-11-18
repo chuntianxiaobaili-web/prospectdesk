@@ -1,0 +1,87 @@
+{
+  "schema": 1,
+  "release": "0.4.0",
+  "testScope": "actual-browser-local-synthetic-page",
+  "headless": true,
+  "emailApiUsed": false,
+  "browsers": [
+    {
+      "browserId": "edge",
+      "browserVersion": "157.0.4341.60",
+      "startedAt": "2026-11-17T11:13:26.877Z",
+      "finishedAt": "2026-11-17T11:13:29.153Z",
+      "localControlPassed": true,
+      "checks": {
+        "identity": true,
+        "snapshot": true,
+        "defaultInputBlocked": true,
+        "typing": true,
+        "keyInput": true,
+        "click": true,
+        "rightClick": true,
+        "staleReference": true,
+        "finalInputGuard": true,
+        "reload": true,
+        "identityAfterActions": true,
+        "closed": true
+      },
+      "cliProbePassed": true,
+      "mailboxCompatibility": "not_tested",
+      "liveMailWorkflow": "not_tested",
+      "mailSent": 0,
+      "draftsDeleted": 0
+    },
+    {
+      "browserId": "chrome",
+      "browserVersion": "157.0.8103.51",
+      "startedAt": "2026-11-17T11:14:34.057Z",
+      "finishedAt": "2026-11-17T11:14:34.877Z",
+      "localControlPassed": true,
+      "checks": {
+        "identity": true,
+        "snapshot": true,
+        "defaultInputBlocked": true,
+        "typing": true,
+        "keyInput": true,
+        "click": true,
+        "rightClick": true,
+        "staleReference": true,
+        "finalInputGuard": true,
+        "reload": true,
+        "identityAfterActions": true,
+        "closed": true
+      },
+      "cliProbePassed": true,
+      "mailboxCompatibility": "not_tested",
+      "liveMailWorkflow": "not_tested",
+      "mailSent": 0,
+      "draftsDeleted": 0
+    },
+    {
+      "browserId": "yandex",
+      "browserVersion": "26.8.0.0",
+      "startedAt": "2026-11-17T11:14:40.470Z",
+      "finishedAt": "2026-11-17T11:14:43.605Z",
+      "localControlPassed": true,
+      "checks": {
+        "identity": true,
+        "snapshot": true,
+        "defaultInputBlocked": true,
+        "typing": true,
+        "keyInput": true,
+        "click": true,
+        "rightClick": true,
+        "staleReference": true,
+        "finalInputGuard": true,
+        "reload": true,
+        "identityAfterActions": true,
+        "closed": true
+      },
+      "cliProbePassed": true,
+      "mailboxCompatibility": "not_tested",
+      "liveMailWorkflow": "not_tested",
+      "mailSent": 0,
+      "draftsDeleted": 0
+    }
+  ]
+}

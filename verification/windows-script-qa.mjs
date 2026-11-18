@@ -1,0 +1,4 @@
+// Static checks only. This does not execute or validate PowerShell on Windows.
+import fs from 'node:fs';import assert from 'node:assert/strict';
+for(const name of ['install','start']){const s=fs.readFileSync(new URL(`../windows/${name}.ps1`,import.meta.url),'utf8');assert.ok(s.includes("$env:OS -ne 'Windows_NT'"));assert.ok(s.indexOf('& $Node.Source $Validator $DataDir')<s.indexOf('New-Item'));assert.ok(s.includes('if ($LASTEXITCODE -ne 0)'));assert.ok(!/Set-ExecutionPolicy|ExecutionPolicy\s+Bypass|Stop-Process|taskkill|--no-sandbox|remote-debugging-port/i.test(s));}
+const install=fs.readFileSync(new URL('../windows/install.ps1',import.meta.url),'utf8');assert.ok(install.includes('ci --ignore-scripts --no-audit --no-fund'));assert.ok(install.includes('package-lock.json'));console.log(JSON.stringify({passed:true,scope:'PowerShell text assertions only; Windows execution not performed'}));

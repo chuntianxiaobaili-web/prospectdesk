@@ -1,0 +1,17 @@
+{
+  "leadSheet": "客户清单",
+  "evidenceSheet": "研究依据",
+  "key": "编号",
+  "columns": {
+    "need": "需求事实",
+    "inference": "痛点推断",
+    "unknowns": "未知项"
+  },
+  "evidenceColumns": {
+    "evidence": "核实内容",
+    "sourceUrl": "官方来源链接",
+    "sourceDate": "来源读取日期"
+  },
+  "evidenceTypeColumn": "证据类型",
+  "emailEvidenceType": "官方商务邮箱"
+}
