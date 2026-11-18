@@ -1,6 +1,6 @@
-# Codex、Claude Code、DeepSeek 与 Harness 使用教程
+# Codex、Claude、DeepSeek 与 Harness（HAR）使用教程
 
-适用版本：客拓工作台 ProspectDesk v0.6.0。以下先完成研究与写稿，再说明真实浏览器执行的接入条件。HAR 的具体工具名称尚未核实；本项目已存在的宿主集成为 Harness，命令名为 dsh，本教程按此说明。
+适用版本：客拓工作台 ProspectDesk v0.6.0。本教程中的 HAR 指 DeepSeek Harness 客户端，按用户确认的名称对应。以下先完成研究与写稿，再说明真实浏览器执行的接入条件；客户端、模型和命令行入口分别说明。
 
 ## 1. 拉取完整项目，保留资料引用
 
@@ -85,7 +85,7 @@ claude
 
 这里的 `git clone` 在你自己的本机终端运行；把资料交给聊天会话不会自动建立本机浏览器连接。Claude 各端的本地文件与浏览器能力须按其当前环境实际接入，本包尚未验收 Claude 网页/桌面聊天中的固定实发链路。[Claude 各端能力说明](https://support.claude.com/en/articles/15520349-use-claude-cowork-on-web-desktop-and-mobile)
 
-## 3. DeepSeek、Harness/dsh 与 HAR 怎样区分
+## 3. DeepSeek 网页、Harness（HAR）客户端与原生插件
 
 ### DeepSeek 网页或模型
 
@@ -93,11 +93,30 @@ claude
 
 若用 DeepSeek 作为代理宿主的模型后端，应在该宿主中配置实际可用的 provider/model。模型 API 与执行工具是两个部分；本包不替使用者猜测模型 ID，也不把模型调用当作邮件已发送。当前接口配置以[DeepSeek 官方 API 文档](https://api-docs.deepseek.com/)为准。
 
-### Harness / dsh：本包现有的原生插件接口
+### DeepSeek Harness（HAR）客户端：打开完整项目
+
+打开已安装的 DeepSeek Harness 客户端，在工作区选择界面添加并选中完整 `prospectdesk` 目录，再新建会话。官方 Web 界面的入口名为 **Choose workspace**，选择工作区后才能开始会话；桌面客户端使用同一应用的桌面载体，并支持本地文件夹选择。界面的实际语言和入口以安装版本为准。[官方工作区说明](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/guide/index.md)、[官方桌面说明](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/README.md)
+
+先发送第 2 节的研究与写稿任务，让代理实际读取完整 `skills/research/SKILL.md`、`skills/b2b-first-outreach/SKILL.md` 与引用资料。随后可发送以下只读检查任务：
+
+```text
+请读取 skills/mailbox-compatibility/SKILL.md 和 docs/browser-mail-session.md。
+列出本会话真实可调用的 sales_* 工具和浏览器连接状态。
+若 sales_browser_mail_compatibility 已注册，执行一次只读检查，
+核对当前浏览器、准确邮箱账号、连接对象与页面。
+保留实际工具输出；缺少的工具或连接逐项写明。
+本次检查不创建邮件、不发送、不清理草稿。
+```
+
+工作区文件可读，只证明资料已接入；浏览器执行须有当前宿主真实注册的固定工具与连接。本包尚未在 DeepSeek Harness 桌面客户端完成真实邮箱发送验收，已有 20 封实发记录来自 Codex/CUA 桌面环境。
+
+### Harness 原生插件：当前官方命令仍为 dsh
 
 Harness 是运行代理和工具的宿主，DeepSeek 可以是其模型来源。本包的 `src/plugin.js` 导出 `name`、`inject` 和 `apply`，要求宿主提供 `tools`、`llm`，再注册 `sales_*` 工具。本包技术手册记录的历史对接目标是 `@deepseek-ai/dsh 0.2.1-rc.2`；其他版本须重新核对加载和接口。
 
-已经安装 Harness 的用户先检查版本，再复制一个独立的本地配置：
+截至本教程核对时，官方 README 与 CLI 文档仍将启动命令命名为 `dsh`；HAR 在本教程中是客户端简称，并非另一个已核实的命令名。桌面客户端如需启用命令，可使用应用菜单 **Manage dsh Command…** 的安装入口，完成后打开新终端运行 `dsh --version`。菜单名称可能按语言本地化。[官方客户端命令说明](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/desktop/README.md#terminal-command)、[官方 CLI 文档](https://github.com/deepseek-ai/deepseek-harness/blob/master/apps/cli/README.md)
+
+已经具备 `dsh` 命令的用户，在 ProspectDesk 根目录先检查版本，再复制一个独立的本地配置：
 
 ```powershell
 dsh --version
@@ -110,13 +129,13 @@ Copy-Item .\examples\plugin.patch.yml .\plugin.local.patch.yml
 dsh web --patch ((Resolve-Path .\plugin.local.patch.yml).Path)
 ```
 
-这里的命令用于加载宿主配置。官方提供 Harness 的启动与插件路径要求：[Harness 项目](https://github.com/deepseek-ai/deepseek-harness)、[官方插件入门](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/index.md)。该样例不自动取得正在登录的邮箱。
+这里的命令启动带配置的 Web 宿主，不会把插件注入另一个已经运行的桌面客户端。未安装命令的用户可按官方 README 使用 `npx @deepseek-ai/dsh web` 启动基础 Web 界面；该基础启动同样没有自动装入本包。桌面客户端中的插件加载需按其安装版本的实际插件设置重新检查。本教程不把历史插件配置视为所有桌面版本的一键安装包。官方提供 Harness 的启动与插件路径要求：[Harness 项目](https://github.com/deepseek-ai/deepseek-harness)、[官方插件入门](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/user/develop/basic/index.md)。该样例不自动取得正在登录的邮箱。
 
 真实浏览器路线还需要宿主在同一运行进程中，把实际连接对象传给插件的 `browserMail.connection`，或传入兼容的 `browserMail.tab`；同时配置准确 `config.accountId`。Gmail 需显式选择 `mailProfile: 'chinese-gmail-ui'`。连接对象包含运行中的方法与身份校验，不是可以写进静态 YAML 的一段账号字符串。[浏览器接入说明](browser-mail-session.md)
 
 接线后的宿主必须能正常注册和调用工具；单纯把 `sales_*` 名字写进提示词不会创建这些工具。[Harness 官方工具注册说明](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/core/tools/README.md)
 
-如果 HAR 指的是另一个产品，应先核对其完整名称、技能格式和浏览器工具接口，再列入兼容清单；目前本包记录的是 Harness/dsh 接入。
+当前版本的加载成功、`tools` / `llm` 服务可用与浏览器接线，需要分别取得实际检查结果。历史 `0.2.1-rc.2` 目标和当前客户端版本保留在记录中，避免把加载记录混作实发记录。
 
 ## 4. 首次真实执行、故障判断与日常更新
 
@@ -171,8 +190,8 @@ npm ci
 | Codex CLI / IDE | 项目文件与技能方法 | 仍需对应宿主的真实浏览器接线，未把桌面验收移作CLI验收 |
 | Claude Code | 项目文件中的研究与写稿方法 | 本项目尚未验收Claude Code真实邮箱发送连接 |
 | DeepSeek 网页 / 单独模型API | 文案方法与结构化输入输出 | 需要代理执行宿主，未验收为独立桌面控制器 |
-| Harness / dsh | 原生插件与工具注册接口 | 保留历史加载/接口记录；本轮20封实发来自Codex/CUA环境 |
-| HAR其他具体产品 | 待核对完整产品和接口 | 未列为已兼容 |
+| DeepSeek Harness（HAR）桌面客户端 | 在完整工作区读取资料与技能；实际工具需检查注册和连接 | 本项目尚未完成该客户端的真实发送验收 |
+| Harness / dsh 原生插件入口 | 原生插件与工具注册接口；历史目标0.2.1-rc.2 | 保留历史加载/接口记录；本轮20封实发来自Codex/CUA环境 |
 
 本教程未触发任何邮件发送；可见范围和程序验收以仓库内具体记录为准。
 
