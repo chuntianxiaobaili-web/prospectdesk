@@ -27,3 +27,11 @@ plugin.local.patch.yml
 __pycache__/
 browser-mail-runs/
 profiles/
+
+# Local Codex settings and mail state
+/.codex/config.toml
+.prospectdesk/
+/codex/chrome-data/
+/codex/state/
+/codex/state-*/
+/codex/compatibility-repair.json

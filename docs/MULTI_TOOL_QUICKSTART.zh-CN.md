@@ -1,6 +1,6 @@
 # Codex、Claude、DeepSeek 与 Harness（HAR）使用教程
 
-适用版本：客拓工作台 ProspectDesk v0.6.0。本教程中的 HAR 指 DeepSeek Harness 客户端，按用户确认的名称对应。以下先完成研究与写稿，再说明真实浏览器执行的接入条件；客户端、模型和命令行入口分别说明。
+适用版本：客拓工作台 ProspectDesk v0.6.1。本教程中的 HAR 指 DeepSeek Harness 客户端，按用户确认的名称对应。以下先完成研究与写稿，再说明真实浏览器执行的接入条件；客户端、模型和命令行入口分别说明。
 
 ## 1. 拉取完整项目，保留资料引用
 
@@ -57,7 +57,7 @@ XLSX 导入/导出另需可调用的 Python 和 openpyxl；CSV 不依赖这项�
 
 Codex 的标准本地技能目录包括项目中的 `.agents/skills` 和用户目录下的 `~/.agents/skills`，CLI/IDE 也可通过技能选择或 `$技能名` 调用已经安装的技能。本教程采用直接读取完整项目的方法，避免移动目录后丢失引用；直接读文件并不意味着技能已自动安装到选择器。[官方技能说明](https://learn.chatgpt.com/docs/build-skills.md)
 
-本项目的 Edge、Chrome 实发记录来自已有浏览器控制能力的 Codex/CUA 桌面环境。另一台电脑、Codex CLI 或 IDE 安装相同指令文件后，仍需由实际宿主提供浏览器连接与固定程序接口。
+0.6.1 提供 Codex 桌面项目级接入，使用专用 Chrome 窗口和 Zoho 草稿箱。需要执行时，请按 [Codex 接入教程](../codex/README.md)安装依赖并生成配置。0.6.0 的 Edge 和 Gmail 实发记录来自 Codex/CUA 桌面环境，复用该方式时仍需宿主具备浏览器连接与固定程序接口。
 
 ### Claude Code：同样先读取项目文件
 

@@ -33,11 +33,12 @@ function mockBrowser(fixture=composeFixture(),options={}) {
   const client=new EventEmitter(),calls=[],values=fixture.values??new Map(),main={};
   const page=new EventEmitter();
   let closed=false,detachCalls=0,reloadCalls=0;
-  const dom=indexDOMTree(fixture.doc);
+  const dom=indexDOMTree(fixture.doc,{frameScope:options.frameScope});
   const hook=options.hook??(()=>{});
   client.send=async(method,params={})=>{
     calls.push({method,params});await hook(method,params,{client,page,main});
     if(method==='DOM.enable'||method==='Accessibility.enable')return {};
+    if(method==='Page.getFrameTree')return {frameTree:{frame:{id:'main-frame',loaderId:options.frameLoader??'first-document'}}};
     if(method==='Accessibility.getFullAXTree')return {nodes:fixture.nodes};
     if(method==='DOM.getDocument')return {root:fixture.doc};
     if(method==='DOM.describeNode'){
@@ -47,8 +48,8 @@ function mockBrowser(fixture=composeFixture(),options={}) {
     if(method==='DOM.resolveNode')return {object:{objectId:'node:'+params.backendNodeId}};
     if(method==='Runtime.callFunctionOn'){
       const id=Number(params.objectId.split(':')[1]),m=dom.get(id);
-      if(params.functionDeclaration.includes('getBoundingClientRect'))return {result:{value:{connected:true,id:m.attributes.id??'',x:40,y:40,width:20,height:20,visible:true,unobscured:options.unobscured!==false}}};
-      return {result:{value:{connected:true,id:m.attributes.id??'',nodeName:m.nodeName,fullValue:values.get(id),password:m.attributes.type==='password'}}};
+      if(params.functionDeclaration.includes('getBoundingClientRect'))return {result:{value:{connected:true,topDocument:options.controlInTopDocument!==false,id:m.attributes.id??'',x:40,y:40,width:20,height:20,visible:true,unobscured:options.unobscured!==false}}};
+      return {result:{value:{connected:true,topDocument:options.controlInTopDocument!==false,focused:options.controlFocused!==false,id:m.attributes.id??'',nodeName:m.nodeName,inputType:m.attributes.type,fullValue:values.get(id),password:m.attributes.type==='password'}}};
     }
     if(method==='Runtime.releaseObject'||method==='DOM.scrollIntoViewIfNeeded'||method==='DOM.focus'||method.startsWith('Input.'))return {};
     throw Error('UNEXPECTED_CDP_METHOD:'+method);
@@ -64,7 +65,7 @@ function mockBrowser(fixture=composeFixture(),options={}) {
 async function setup(options={}) {
   const m=mockBrowser(options.fixture??composeFixture(),options);
   let identityCalls=0;
-  const tab=await createChromiumTab({page:m.page,identityCheck:async()=>{identityCalls++;return options.identity??{ok:true};},mutationGuard:options.guard??null});
+  const tab=await createChromiumTab({page:m.page,identityCheck:async()=>{identityCalls++;return options.identity??{ok:true};},mutationGuard:options.guard??null,frameScope:options.frameScope});
   return {...m,tab,identityCalls:()=>identityCalls,original:m};
 }
 
@@ -306,4 +307,129 @@ test('input errors are never retried even if their text resembles a snapshot rac
   await assert.rejects(()=>m.tab.click(id),/DOCUMENT_CHANGED_DURING_SNAPSHOT/);
   assert.equal(m.calls.filter(c=>c.method==='Input.dispatchMouseEvent').length,1);
  }finally{await m.tab.close();}
+});
+
+
+function topDocumentFixture(){
+  const f=composeFixture(),iframe=element(50,'IFRAME');
+  iframe.contentDocument=element(51,'#document');
+  iframe.contentDocument.children.push(element(52,'BUTTON',{id:'embedded-action'}));
+  f.doc.children.push(iframe);f.nodes[0].frameId='main-frame';f.nodes[0].childIds.push('a50');
+  f.nodes.push(ax(50,'Iframe','Embedded frame host'));
+  return f;
+}
+test('opt-in reads root-scoped controls without including embedded documents',async()=>{
+  const m=await setup({fixture:topDocumentFixture(),frameScope:'top-document',frames:2,guard:()=>{}});
+  try{
+    const state=await m.tab.getAXState();
+    assert.equal(parseCompose(state,account,itemRef).body,body);
+    assert.doesNotMatch(state,/Embedded frame host|embedded-action/);
+    assert.deepEqual(m.calls.find(c=>c.method==='Accessibility.getFullAXTree').params,{frameId:'main-frame'});
+    await m.tab.click(indexOf(state,/button 发送$/));
+    assert.equal(m.calls.filter(c=>c.method==='Input.dispatchMouseEvent').length,2);
+  }finally{await m.tab.close();}
+});
+test('opt-in rejects AX cross-frame metadata or a node outside the root DOM index',async()=>{
+  for(const frameId of ['child-frame',undefined]){
+    const fixture=topDocumentFixture();
+    fixture.nodes[0].childIds.push('a52');
+    fixture.nodes.push(ax(52,'button','Embedded action',{frameId}));
+    const m=await setup({fixture,frameScope:'top-document',frames:2});
+    try{
+      await assert.rejects(()=>m.tab.getAXState(),/AX_NODE_OUTSIDE_TOP_DOCUMENT/);
+      assert.equal(m.calls.some(c=>c.method==='DOM.describeNode'),false);
+      assert.equal(m.calls.some(c=>c.method.startsWith('Input.')),false);
+    }finally{await m.tab.close();}
+  }
+});
+test('opt-in rejects AX tree whose root does not identify the live DOM document',async()=>{
+  const fixture=topDocumentFixture();fixture.nodes[0].backendDOMNodeId=2;
+  const m=await setup({fixture,frameScope:'top-document',frames:2});
+  try{
+    await assert.rejects(()=>m.tab.getAXState(),/TOP_DOCUMENT_AX_ROOT_UNVERIFIED/);
+    assert.equal(m.calls.some(c=>c.method.startsWith('Input.')),false);
+  }finally{await m.tab.close();}
+});
+test('opt-in rechecks frame loader and identity before physical input',async()=>{
+  for(const change of ['frameLoader','identity']){
+    const options={fixture:topDocumentFixture(),frameScope:'top-document',frames:2,guard:()=>{}};
+    const m=await setup(options);
+    try{
+      const ind=indexOf(await m.tab.getAXState(),/button 发送$/);
+      if(change==='frameLoader')options.frameLoader='new-document';else options.identity={ok:false};
+      await assert.rejects(()=>m.tab.click(ind),/TOP_DOCUMENT_CHANGED_SINCE_SNAPSHOT|BROWSER_IDENTITY_CHANGED/);
+      assert.equal(m.calls.some(c=>c.method.startsWith('Input.')),false);
+    }finally{await m.tab.close();}
+  }
+});
+test('opt-in requires the top-document target to retain keyboard focus',async()=>{
+  const m=await setup({fixture:topDocumentFixture(),frameScope:'top-document',frames:2,guard:()=>{},controlFocused:false});
+  try{
+    const ind=indexOf(await m.tab.getAXState(),/text field.*Value: Existing/);
+    await assert.rejects(()=>m.tab.typeText(ind,'example'),/TOP_DOCUMENT_INPUT_FOCUS_UNVERIFIED/);
+    assert.equal(m.calls.some(c=>c.method.startsWith('Input.')),false);
+  }finally{await m.tab.close();}
+});
+
+
+test('opt-in removes CSS pseudo controls and exposes top-scoped idless text as read-only',async()=>{
+  const fixture=topDocumentFixture();
+  fixture.doc.children[0].pseudoElements=[{...element(53,'::before'),children:[element(54,'#text')]}];
+  fixture.nodes[0].childIds.push('a53','a55');
+  fixture.nodes.push(ax(53,'button','Pseudo action',{childIds:['a54']}),
+    ax(54,'StaticText','Decorative generated text'),
+    ax(55,'StaticText','Top-only readable run',{backendDOMNodeId:undefined}));
+  const m=await setup({fixture,frameScope:'top-document',frames:2,guard:()=>{}});
+  try{
+    const state=await m.tab.getAXState();
+    assert.doesNotMatch(state,/Pseudo action|Decorative generated text/);
+    const textInd=indexOf(state,/text Top-only readable run$/);
+    assert.ok(textInd);
+    await assert.rejects(()=>m.tab.click(textInd),/CONTROL_HAS_NO_DOM_TARGET/);
+    assert.equal(m.calls.some(c=>c.method.startsWith('Input.')),false);
+  }finally{await m.tab.close();}
+});
+
+
+test('opt-in accepts identical duplicate anonymous text runs and rejects duplicate controls',async()=>{
+  for(const duplicateControl of [false,true]){
+    const fixture=topDocumentFixture();
+    const virtual=ax(56,'InlineTextBox','Decoration',{backendDOMNodeId:undefined});
+    fixture.nodes[0].childIds.push('a56');
+    fixture.nodes.push(virtual);
+    fixture.nodes.push(structuredClone(duplicateControl?fixture.nodes[2]:virtual));
+    const m=await setup({fixture,frameScope:'top-document',frames:2});
+    try{
+      if(duplicateControl)await assert.rejects(()=>m.tab.getAXState(),/ACCESSIBILITY_NODE_ID_AMBIGUOUS/);
+      else assert.equal(parseCompose(await m.tab.getAXState(),account,itemRef).body,body);
+    }finally{await m.tab.close();}
+  }
+});
+
+test('native search input stays single-line when UI also sets contenteditable',()=>{
+  const node=ax(1,'textbox','搜索 ( / )');
+  const meta=new Map([[1,{nodeName:'INPUT',attributes:{type:'text',contenteditable:'true'},fullValue:''}]]);
+  assert.match(serialize([node],meta),/text field \(settable\) 搜索 \( \/ \)$/);
+});
+test('Space operates only a focused native top-document checkbox',async()=>{
+  for(const native of [true,false]){
+    const fixture=topDocumentFixture();
+    fixture.nodes[0].childIds.push('a57');
+    fixture.nodes.push(ax(57,'checkbox','包含垃圾邮件/回收站',{properties:props({checked:false})}));
+    fixture.doc.children.push(element(57,native?'INPUT':'SPAN',native?{type:'checkbox'}:{}));
+    let allowed=0;
+    const m=await setup({fixture,frameScope:'top-document',guard:()=>{allowed++;}});
+    try{
+      const id=indexOf(await m.tab.getAXState(),/checkbox \(settable, integer\) 0$/);
+      if(native){
+        await m.tab.pressKey(id,'Space');
+        assert.equal(m.calls.filter(c=>c.method==='Input.dispatchKeyEvent').length,2);
+        assert.equal(allowed,1);
+      }else{
+        await assert.rejects(()=>m.tab.pressKey(id,'Space'),/NATIVE_CHECKBOX_REQUIRED/);
+        assert.equal(m.calls.some(c=>c.method.startsWith('Input.')),false);
+        assert.equal(allowed,0);
+      }
+    }finally{await m.tab.close();}
+  }
 });

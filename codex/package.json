@@ -1,0 +1,13 @@
+{
+  "name": "prospectdesk-codex-bridge",
+  "version": "0.6.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node mcp-server.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.1.12"
+  }
+}

@@ -25,6 +25,42 @@ export function parseRows(state) {
   }
   return rows;
 }
+function parseNamedComposeHeader(header,accountId) {
+  const senders=[...header.matchAll(/^[\t ]*\d+ button (\(disabled\) )?From(?: (.*))?$/gm)];
+  if(senders.length!==1||senders[0][1]||senders[0][2]!==accountId)
+    throw Error('COMPOSE_ACCOUNT_MISMATCH');
+  const subjects=[...header.matchAll(/^[\t ]*\d+ text field \(settable\) 主题, Value: (.*?)(?:, ID: [^\r\n]+)?$/gm)];
+  if(subjects.length!==1||subjects[0].index<=senders[0].index)throw Error('SUBJECT_AMBIGUOUS');
+  const addressRegion=header.slice(senders[0].index+senders[0][0].length,subjects[0].index);
+  const trailingHeader=header.slice(subjects[0].index+subjects[0][0].length);
+  const parseControls=region=>region.split('\n').filter(line=>line.trim())
+    .map(line=>/^[\t ]*\d+ (.*)$/.exec(line)?.[1])
+    .filter(row=>!/^container(?:, ID: [^\r\n]+)?$/.test(row??''));
+  // The subject mirror and the observed plain editor toolbar follow the address fields.
+  const tail=parseControls(trailingHeader);
+  if(tail.length){
+    const toolbar=tail.indexOf('toolbar 格式选项');
+    const subjectMirror='text '+subjects[0][1];
+    const editorControls=new Set(['group','button 附件','button 录制音频','button 拼写检查',
+      'switch 打开黑暗模式','switch 关闭黑暗模式','button 切换至富文本']);
+    if(toolbar<0||tail.slice(0,toolbar).some(row=>row!==subjectMirror)||
+       tail.slice(toolbar+1).some(row=>!editorControls.has(row)))
+      throw Error('COMPOSE_RECIPIENT_LAYOUT_UNVERIFIED');
+  }
+  // The observed Chrome layout presents To and Cc as consecutive selectors
+  // and exposes an "add Bcc" button only while Bcc is collapsed and empty.
+  // Ignore empty wrappers, but require every remaining control in order.
+  const controls=parseControls(addressRegion);
+  const [toPicker,toList,recipient,toSelected,addBcc,ccPicker,ccList,ccEmpty]=controls;
+  if(controls.length!==8||toPicker!=='button 选择联系人'||toList!=='listbox 搜索字段'||
+     toSelected!=='combo box (collapsed, settable) Description: 1被选中'||
+     addBcc!=='button 添加密件抄送的收件人'||ccPicker!=='button 选择联系人'||
+     ccList!=='listbox 搜索字段'||ccEmpty!=='combo box (collapsed, settable) Description: 已选择“无”')
+    throw Error('COMPOSE_RECIPIENT_LAYOUT_UNVERIFIED');
+  if(!/^[^\s<>]+@[^\s<>]+$/.test(recipient??''))throw Error('RECIPIENT_OR_CC_CHANGED');
+  return {subject:subjects[0][1],addresses:[recipient.toLowerCase()]};
+}
+
 export function parseCompose(state,accountId,ref) {
   if(!state.includes(`From ${accountId}`))throw Error('COMPOSE_ACCOUNT_MISMATCH');
   const send=[...state.matchAll(/^\s*(\d+) button 发送\s*$/gm)];
@@ -33,12 +69,17 @@ export function parseCompose(state,accountId,ref) {
   const editors=[...state.matchAll(/^\s*\d+ (?:text entry area \(settable\) Description: 纯文本编辑区域|container (?:Description: )?富文本编辑区域)(?:, Value:[^\n]*)?\s*$/gm)];
   if(editors.length!==1)throw Error('COMPOSE_EDITOR_AMBIGUOUS');
   const bodyMatch=/(?:text entry area \(settable\) Description: 纯文本编辑区域|container (?:Description: )?富文本编辑区域), Value: ([\s\S]*?)(?=\n\t+\d+ |$)/.exec(state);
-  if(addressStart<0||!bodyMatch)throw Error('COMPOSE_LAYOUT_CHANGED');
-  const subjectMatches=[...state.slice(addressStart,bodyMatch.index).matchAll(/^\s*\d+ text field \(settable\) Value: (.*?)(?:, ID: .*|)$/gm)];
-  if(subjectMatches.length!==1)throw Error('SUBJECT_AMBIGUOUS');
-  const subject=subjectMatches[0][1];
-  const addressSection=state.slice(addressStart,state.indexOf(subjectMatches[0][0],addressStart));
-  const addresses=[...addressSection.matchAll(/^\s*\d+ ([^\s<>]+@[^\s<>]+)\s*$/gm)].map(m=>m[1].toLowerCase());
+  if(!bodyMatch)throw Error('COMPOSE_LAYOUT_CHANGED');
+  let addresses,subject;
+  if(addressStart>=0&&addressStart<bodyMatch.index) {
+    const subjectMatches=[...state.slice(addressStart,bodyMatch.index).matchAll(/^\s*\d+ text field \(settable\) Value: (.*?)(?:, ID: .*|)$/gm)];
+    if(subjectMatches.length!==1)throw Error('SUBJECT_AMBIGUOUS');
+    subject=subjectMatches[0][1];
+    const addressSection=state.slice(addressStart,state.indexOf(subjectMatches[0][0],addressStart));
+    addresses=[...addressSection.matchAll(/^\s*\d+ ([^\s<>]+@[^\s<>]+)\s*$/gm)].map(m=>m[1].toLowerCase());
+  }else {
+    ({subject,addresses}=parseNamedComposeHeader(state.slice(0,editors[0].index),accountId));
+  }
   if(addresses.length!==1||addresses[0]!==ref.recipient)throw Error('RECIPIENT_OR_CC_CHANGED');
   if(subject!==ref.subject)throw Error('SUBJECT_CHANGED');
   if(ref.attachments)throw Error('ATTACHMENT_REQUIRES_REVIEW');
@@ -271,7 +312,13 @@ export class BrowserMailAdapter {
     // Include recoverable deleted messages and bounce reports in the read-only search.
     const include=result.match(/\n\s*(\d+) checkbox \(settable, integer\) 0\n\s*\d+ text 包含垃圾邮件\/回收站/);
     if(include){
-      await this.tab.click(Number(include[1]));await this.snapshot();
+      const filterIndex=Number(include[1]);
+      // A verified native checkbox can be keyboard-operated even if a different
+      // element overlaps its pointer hit area. The post-action scope is still checked.
+      if(this.tab.transport==='playwright-cdp'&&this.tab.frameScope==='top-document')
+        await this.tab.pressKey(filterIndex,'Space');
+      else await this.tab.click(filterIndex);
+      await this.snapshot();
       // This control becomes disabled/unchecked during the request and only
       // becomes enabled/checked after the refreshed full search is rendered.
       result=await this.waitFor(fullSearchReady,'full search complete');

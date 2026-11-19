@@ -149,7 +149,8 @@ async function launchedYandex({chromium,executable,owned,headless,spawnBrowser=s
 /** Start only an application-owned profile; never copy or attach a daily profile.
  * driver/tabFactory are trusted-host test seams, not serialized configuration. */
 async function connectLaunched(options) {
-  const {browserId,dataDirectory,headless=false,driver,tabFactory,executablePath}=options;
+  const {browserId,dataDirectory,headless=false,driver,tabFactory,executablePath,frameScope='strict'}=options;
+  if(!['strict','top-document'].includes(frameScope))throw Error('INVALID_FRAME_SCOPE');
   if(typeof headless!=='boolean')throw Error('HEADLESS_MUST_BE_BOOLEAN');
   let executable,sourceEvidence=browserId==='yandex'?'explicit_yandex_executable':'playwright_installed_channel';
   if(browserId==='yandex'&&executablePath===undefined)throw Error('YANDEX_EXECUTABLE_PATH_REQUIRED');
@@ -195,7 +196,7 @@ async function connectLaunched(options) {
     const first=await verifyIdentity();
     const identity=Object.freeze(Object.fromEntries(Object.entries(first).filter(([key])=>key!=='ok')));
     const createTab=tabFactory??(await import('./chromium-tab.mjs')).createChromiumTab;
-    tab=await createTab({page,identityCheck:verifyIdentity});
+    tab=await createTab({page,identityCheck:verifyIdentity,frameScope});
     assertTab(tab);
     return {
       tab,page,identity,verifyIdentity,sourceEvidence,

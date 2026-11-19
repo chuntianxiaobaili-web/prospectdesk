@@ -1,6 +1,6 @@
 {
   "name": "@fsarcan/harness-sales-workflow",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Harness B2B research, approved drafting and browser-mail session workflow",
   "type": "module",
   "main": "./src/plugin.js",
@@ -35,6 +35,12 @@
   "license": "MIT",
   "files": [
     "src",
+    "codex/README.md",
+    "codex/configure.mjs",
+    "codex/mcp-server.mjs",
+    "codex/runtime.mjs",
+    "codex/package.json",
+    "codex/package-lock.json",
     "examples",
     "docs",
     "README.zh-CN.md",

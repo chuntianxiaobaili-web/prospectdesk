@@ -512,3 +512,54 @@ test('visible readiness rejects unbounded or invalid windows before observing th
   for(const timeout of invalid)await assert.rejects(()=>a.waitFor(()=>true,'invalid',timeout),/VISIBLE_READY_TIMEOUT/);
   assert.equal(reads,0);
 });
+
+
+const chromeCompose=[
+  '0 AXWebArea Zoho Mail ('+account+')','  3 button 发送','  4 button From '+account,
+  '    5 container','    6 button 选择联系人','    7 listbox 搜索字段',
+  '      8 '+ref.recipient,'    9 combo box (collapsed, settable) Description: 1被选中',
+  '    10 container','    11 button 添加密件抄送的收件人','    12 container',
+  '    13 button 选择联系人','    14 listbox 搜索字段',
+  '    15 combo box (collapsed, settable) Description: 已选择“无”','    16 container',
+  '    17 text field (settable) 主题, Value: '+ref.subject+', ID: subject',
+  '\t18 text entry area (settable) Description: 纯文本编辑区域, Value: Hello team,',
+  '', 'Here is the update.', '', 'Regards', '\t19 tab (selected) Description: compose',
+].join('\n');
+
+test('Chrome compose binds the observed named subject and one selected To address',()=>{
+  assert.deepEqual(parseCompose(chromeCompose,account,ref),parseCompose(compose,account,ref));
+});
+test('Chrome compose refuses populated Cc, opened Bcc and unverified recipient layouts',()=>{
+  const invalid=[
+    chromeCompose.replace('已选择“无”','1被选中'),
+    chromeCompose.replace('    11 button 添加密件抄送的收件人','    11 listbox 搜索字段'),
+    chromeCompose.replace('    12 container','    12 container\n    20 recipient@example.com'),
+    chromeCompose.replace('    14 listbox 搜索字段','    14 container'),
+    chromeCompose.replace('    10 container','    10 container Description: unknown format'),
+    chromeCompose.replace('\t18 text entry area','    21 listbox 搜索字段\n    22 cc@example.com\n\t18 text entry area'),
+    chromeCompose.replace('      8 '+ref.recipient,'      8 '+ref.recipient+', extra@example.com')
+  ];
+  for(const state of invalid)assert.throws(()=>parseCompose(state,account,ref),/RECIPIENT/);
+});
+test('Chrome compose refuses conflicting, missing or duplicate senders and subjects',()=>{
+  for(const from of ['    40 button From different@example.com','    41 button From '+account]){
+    assert.throws(()=>parseCompose(chromeCompose.replace('    5 container',from+'\n    5 container'),account,ref),/ACCOUNT/);
+  }
+  assert.throws(()=>parseCompose(chromeCompose.replace('button From ','button (disabled) From '),account,ref),/ACCOUNT/);
+  assert.throws(()=>parseCompose(chromeCompose.replace('    17 text field','    40 text field (settable) 主题, Value: '+ref.subject+'\n    17 text field'),account,ref),/SUBJECT/);
+  assert.throws(()=>parseCompose(chromeCompose.replace(ref.subject+', ID:', 'Changed, ID:'),account,ref),/SUBJECT_CHANGED/);
+});
+test('Chrome compose still refuses duplicate or disabled send and attached drafts',()=>{
+  assert.throws(()=>parseCompose(chromeCompose+'\n  20 button 发送',account,ref),/SEND_CONTROL_AMBIGUOUS/);
+  assert.throws(()=>parseCompose(chromeCompose.replace('button 发送','button (disabled) 发送'),account,ref),/SEND_CONTROL_AMBIGUOUS/);
+  assert.throws(()=>parseCompose(chromeCompose,account,{...ref,attachments:true}),/ATTACHMENT/);
+});
+
+test('Chrome compose accepts its exact visible editor toolbar but rejects address controls inserted after the subject',()=>{
+  const extended=chromeCompose.replace('\t18 text entry area',[
+    '    31 text '+ref.subject,'    32 toolbar 格式选项','    33 group','    34 button 附件',
+    '    35 switch 打开黑暗模式','    36 button 切换至富文本','\t18 text entry area'
+  ].join('\n'));
+  assert.deepEqual(parseCompose(extended,account,ref),parseCompose(compose,account,ref));
+  assert.throws(()=>parseCompose(extended.replace('    33 group','    39 listbox 搜索字段'),account,ref),/COMPOSE_RECIPIENT_LAYOUT_UNVERIFIED/);
+});
