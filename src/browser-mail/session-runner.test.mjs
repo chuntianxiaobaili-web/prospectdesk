@@ -12,7 +12,7 @@ const itemFor = draftId => ({accountId:'test@example.test', draftId, draftVersio
 const sentFor = item => ({status:'sent', authoritative:true, messageId:`sent-${item.draftId}`, recipient:item.recipient, ...binding(item)});
 const cleanupFor = (item, receipt) => ({status:'trashed', authoritative:true, sentMessageId:receipt.messageId, ...binding(item)});
 
-function fixture({refs=['a','b','c'], durationMs=1000, intervalMs=100, target=3, prepareAheadMs=0, overrides={}, storeOverride,useDefaultSleep=false,onRuntimeReminder=null}={}) {
+function fixture({refs=['a','b','c'], durationMs=1000, intervalMs=100, target=3, prepareAheadMs=0, retainSentDrafts=false, overrides={}, storeOverride,useDefaultSleep=false,onRuntimeReminder=null}={}) {
   let now = 0;
   let timerId = 0;
   const callbacks = new Map();
@@ -41,7 +41,7 @@ function fixture({refs=['a','b','c'], durationMs=1000, intervalMs=100, target=3,
     ...overrides,
   };
   const sleep = async(ms)=>{sleeps.push(ms);advance(ms);};
-  const runner = new MailSessionRunner({adapter,clock,timers,store,durationMs,intervalMs,target,prepareAheadMs,sleep:useDefaultSleep?undefined:sleep,onRuntimeReminder});
+  const runner = new MailSessionRunner({adapter,clock,timers,store,durationMs,intervalMs,target,prepareAheadMs,retainSentDrafts,sleep:useDefaultSleep?undefined:sleep,onRuntimeReminder});
   return {runner,adapter,clock,advance,writes,clicks,cleanupClicks,callbacks,sleeps};
 }
 
@@ -174,6 +174,69 @@ test('provider-consumed originals count separately with authoritative absence',a
   f.adapter.cleanup=async(item,receipt)=>({...cleanupFor(item,receipt),status:'already_absent'});
   await f.runner.initialize();f.runner.start();await f.runner.step();
   assert.equal(f.runner.status().cleaned,1);assert.equal(f.runner.status().alreadyAbsent,1);assert.equal(f.runner.status().trashed,0);
+});
+
+test('explicit retention continues confirmed sends at the fixed interval without inventing cleanup',async()=>{
+  const f=fixture({refs:['a','b'],durationMs:null,target:2,intervalMs:72000,prepareAheadMs:60000,retainSentDrafts:true,
+    overrides:{async cleanup(){throw Error('PERMANENT_DRAFT_DELETE_REQUIRES_CURRENT_APPROVAL');}}});
+  await f.runner.initialize();f.runner.start();
+  const first=await f.runner.step();
+  assert.equal(first.phase,'running');assert.equal(first.sent,1);assert.equal(first.cleanupPending,1);
+  f.advance(first.waitMs);const second=await f.runner.step();
+  assert.equal(second.phase,'target_reached');assert.equal(second.sent,2);
+  assert.equal(second.cleanupPending,2);assert.equal(second.cleaned,0);assert.equal(second.retainSentDrafts,true);
+  assert.deepEqual(f.clicks.map(c=>c.at),[0,72000]);assert.deepEqual(f.cleanupClicks,[]);
+  assert.equal(f.runner.state.events.filter(e=>e.type==='cleanup_intent').length,0);
+  assert.equal(f.runner.state.events.filter(e=>e.type==='cleanup_retained').length,2);
+  for(const record of f.runner.state.records){
+    assert.equal(record.status,'sent');assert.equal(record.cleanup,'pending');
+    assert.equal(record.cleanupReason,'retained_by_send_only_policy');
+    assert.equal(record.cleanupError,'PERMANENT_DRAFT_DELETE_REQUIRES_CURRENT_APPROVAL');
+    assert.equal(record.cleanupReceipt,undefined);
+  }
+  await f.runner.step();assert.equal(f.clicks.length,2);
+  assert.equal((await f.runner.finish()).cleanupPending,2);
+});
+
+test('retention is opt-in and default permission-held cleanup still halts',async()=>{
+  const f=fixture({durationMs:null,overrides:{async cleanup(){throw Error('PERMANENT_DRAFT_DELETE_REQUIRES_CURRENT_APPROVAL');}}});
+  await f.runner.initialize();f.runner.start();await f.runner.step();
+  assert.equal(f.runner.status().retainSentDrafts,false);
+  assert.equal(f.runner.status().stopReason,'cleanup_unknown');assert.equal(f.runner.status().sent,1);
+  assert.equal(f.runner.state.records[0].cleanupReason,undefined);
+  f.advance(100);await f.runner.step();assert.equal(f.clicks.length,1);
+});
+
+test('retention does not continue unrelated or already-attempted cleanup failures',async()=>{
+  for(const attempted of [false,true]){
+    const f=fixture({durationMs:null,retainSentDrafts:true,overrides:{
+      async cleanup(_item,_receipt,{beforeClick}){
+        if(attempted)await beforeClick();
+        throw Error(attempted?'PERMANENT_DRAFT_DELETE_REQUIRES_CURRENT_APPROVAL':'ORIGINAL_DRAFT_CHANGED');
+      }
+    }});
+    await f.runner.initialize();f.runner.start();await f.runner.step();
+    assert.equal(f.runner.status().stopReason,'cleanup_unknown');assert.equal(f.runner.status().sent,1);
+    assert.equal(f.runner.state.records[0].cleanup,attempted?'unknown':'pending');
+    assert.equal(f.runner.state.records[0].cleanupReason,undefined);
+    assert.equal(f.runner.state.events.filter(e=>e.type==='cleanup_retained').length,0);
+  }
+});
+
+test('retention never resolves or retries an unknown send',async()=>{
+  let cleanupCalls=0;
+  const f=fixture({durationMs:null,retainSentDrafts:true,overrides:{
+    async send(item,{beforeClick}){await beforeClick();f.clicks.push(item.draftId);return {status:'unknown'};},
+    async cleanup(){cleanupCalls++;throw Error('PERMANENT_DRAFT_DELETE_REQUIRES_CURRENT_APPROVAL');}
+  }});
+  await f.runner.initialize();f.runner.start();await f.runner.step();
+  assert.equal(f.runner.status().stopReason,'send_unknown');assert.equal(f.runner.status().sent,0);
+  assert.equal(f.runner.status().unknown,1);assert.equal(cleanupCalls,0);
+  f.advance(100);await f.runner.step();assert.deepEqual(f.clicks,['a']);
+});
+
+test('retention configuration requires an actual boolean',()=>{
+  assert.throws(()=>fixture({retainSentDrafts:'true'}),/retainSentDrafts must be a boolean/);
 });
 
 test('late polling does not create a catch-up burst',async()=>{

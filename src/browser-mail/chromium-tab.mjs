@@ -24,6 +24,89 @@ const exactId = value => {const id=String(value??'');if(/[\r\n\t,]/u.test(id)||i
 const named = (label, name) => label + (name ? ' ' + name : '');
 const identityOK = result => result === true || result?.ok === true;
 
+const composeHostId = /^zmComposeEditor_Cmp[0-9]+$/;
+const verifiedFrameSource = 'verified-zoho-compose-frame-v1';
+
+// Resolve the iframe element in an isolated world of the top document. The
+// browser's ordinary same-origin check, not the CDP frame's serialized URL
+// origin, determines whether this owner can access its contentDocument.
+const READ_COMPOSE_FRAME_OWNER = `function readComposeFrameOwner() {
+  if(!this || !this.isConnected || this.nodeType!==1) return {connected:false};
+  const host=this.closest('[id^="zmComposeEditor_Cmp"]');
+  const parent=this.ownerDocument.defaultView,topDocument=parent===globalThis&&parent===parent.top;
+  const visible=node=>{for(let current=node;current&&current.nodeType===1;current=current.parentElement){
+    const style=current.ownerDocument.defaultView.getComputedStyle(current);
+    if(style.display==='none'||style.visibility!=='visible'||Number(style.opacity)===0||current.hidden||current.getAttribute('aria-hidden')==='true')return false;
+  }return true;};
+  const r=this.getBoundingClientRect(),hit=this.ownerDocument.elementFromPoint(r.left+r.width/2,r.top+r.height/2);
+  let sameOriginDocument=false;
+  if(topDocument&&this.tagName==='IFRAME'){
+    try{
+      const doc=this.contentDocument,child=this.contentWindow;
+      sameOriginDocument=!!doc&&!!child&&doc.URL==='about:srcdoc'&&doc.defaultView===child
+        &&child.document===doc&&child.frameElement===this&&child.origin===parent.origin;
+    }catch{}
+  }
+  return {connected:true,topDocument,documentOrigin:parent.origin,sameOriginDocument,
+    tag:this.tagName,title:this.getAttribute('title'),label:this.getAttribute('aria-label'),
+    src:this.getAttribute('src'),srcdoc:this.hasAttribute('srcdoc'),hostId:host?.id??null,
+    hostFrameCount:host?.querySelectorAll('iframe,frame,fencedframe,object,embed').length??0,
+    visible:visible(this)&&r.width>0&&r.height>0,unobscured:hit===this,
+    width:r.width,height:r.height};
+}`;
+
+// Recheck the owner's browser-enforced access together with each body read.
+// This never enters a child execution context or obtains universal access.
+const READ_COMPOSE_FRAME_BODY = `function readComposeFrameBody() {
+  const owner=(${READ_COMPOSE_FRAME_OWNER}).call(this);
+  if(!owner.sameOriginDocument||!owner.visible||!owner.unobscured)return {owner};
+  const doc=this.contentDocument,body=doc?.body;
+  if(!body||doc.URL!=='about:srcdoc')return {owner};
+  const explicit=[...doc.querySelectorAll('[contenteditable]')].filter(node=>
+    ['', 'true', 'plaintext-only'].includes(node.getAttribute('contenteditable'))&&node.isContentEditable);
+  let editor;
+  if(explicit.length===1)editor=explicit[0];
+  else if(explicit.length===0&&doc.designMode.toLowerCase()==='on'&&body.isContentEditable)editor=body;
+  if(!editor||!editor.isConnected||!editor.isContentEditable||!body.contains(editor))return {owner};
+  const visible=node=>{for(let current=node;current&&current.nodeType===1;current=current.parentElement){
+    const style=doc.defaultView.getComputedStyle(current);
+    if(style.display==='none'||style.visibility!=='visible'||Number(style.opacity)===0||current.hidden||current.getAttribute('aria-hidden')==='true')return false;
+  }return true;};
+  const r=editor.getBoundingClientRect();
+  if(!visible(editor)||r.width<=0||r.height<=0||body.querySelector('input,textarea,select,iframe,frame,fencedframe,object,embed'))return {owner};
+  const compact=value=>String(value??'').replace(/\\s/gu,'');
+  if(compact(body.textContent)!==compact(editor.textContent))return {owner};
+  return {owner,body:{html:editor.innerHTML,innerText:editor.innerText,textContent:editor.textContent}};
+}`;
+
+function composeFrameTopOrigin(top) {
+  let topUrl;try{topUrl=new URL(top?.url);}catch{throw Error('COMPOSE_FRAME_TOP_URL_UNVERIFIED');}
+  if(topUrl.origin!=='https://mail.zoho.com'||topUrl.pathname!=='/zm/'||topUrl.hash!=='#compose'
+    ||!top.id||!top.loaderId||top.parentId)throw Error('COMPOSE_FRAME_TOP_URL_UNVERIFIED');
+  return topUrl.origin;
+}
+
+function verifyComposeFrameMetadata(top,frame,origin) {
+  // Some Chromium builds serialize srcdoc as "://" in Page.getFrameTree,
+  // including documents whose effective origin inherits the parent.
+  if(!frame?.id||!frame.loaderId||frame.parentId!==top.id||frame.url!=='about:srcdoc'
+    ||![origin,'://'].includes(frame.securityOrigin))throw Error('COMPOSE_FRAME_ORIGIN_UNVERIFIED');
+}
+
+export function validateComposeFrameBinding({top,frame,owner,hostId,ownerBackendNodeId}) {
+  const origin=composeFrameTopOrigin(top);
+  verifyComposeFrameMetadata(top,frame,origin);
+  if(!composeHostId.test(hostId??'')||!Number.isSafeInteger(ownerBackendNodeId)||ownerBackendNodeId<=0
+    ||owner?.connected!==true||owner.topDocument!==true||owner.tag!=='IFRAME'
+    ||owner.title!=='文本编辑区域'||owner.label!=='文本编辑区域'||owner.src!==null||owner.srcdoc!==true
+    ||owner.hostId!==hostId||owner.hostFrameCount!==1||owner.visible!==true||owner.unobscured!==true
+    ||!Number.isFinite(owner.width)||!Number.isFinite(owner.height)||owner.width<=0||owner.height<=0)
+    throw Error('COMPOSE_FRAME_OWNER_UNVERIFIED');
+  if(owner.documentOrigin!==origin||owner.sameOriginDocument!==true)throw Error('COMPOSE_FRAME_ORIGIN_UNVERIFIED');
+  return {topFrameId:top.id,topLoaderId:top.loaderId,frameId:frame.id,
+    frameLoaderId:frame.loaderId,securityOrigin:origin,ownerBackendNodeId,hostId};
+}
+
 export function indexDOMTree(root, {frameScope='strict'}={}) {
   if(!['strict','top-document'].includes(frameScope))throw Error('INVALID_FRAME_SCOPE');
   const map = new Map();
@@ -278,8 +361,8 @@ export async function createChromiumTab({page,identityCheck,mutationGuard=null,f
     if(ref.password)throw Error('PROTECTED_INPUT_UNSUPPORTED');
     return ref;
   };
-  const remoteRead=async(backendNodeId,functionDeclaration)=>{
-    const resolved=await client.send('DOM.resolveNode',{backendNodeId});
+  const remoteRead=async(backendNodeId,functionDeclaration,executionContextId)=>{
+    const resolved=await client.send('DOM.resolveNode',executionContextId===undefined?{backendNodeId}:{backendNodeId,executionContextId});
     const objectId=resolved.object?.objectId;
     if(!objectId)throw Error('CONTROL_DOM_TARGET_MISSING');
     try{
@@ -317,9 +400,76 @@ export async function createChromiumTab({page,identityCheck,mutationGuard=null,f
     await client.send('Input.dispatchKeyEvent',{type:'keyDown',...key,modifiers});
     await client.send('Input.dispatchKeyEvent',{type:'keyUp',key:key.key,code:key.code,windowsVirtualKeyCode:key.windowsVirtualKeyCode,modifiers});
   };
+  const readComposeFrame=async(editorHostId)=>{
+    if(!topDocumentOnly||!composeHostId.test(editorHostId??''))throw Error('COMPOSE_FRAME_SCOPE_REQUIRED');
+    await checkIdentity();
+    const at=epoch,expectedTop=snapshotFrame;
+    if(!expectedTop)throw Error('COMPOSE_FRAME_FRESH_SNAPSHOT_REQUIRED');
+    const [{frameTree},{root}]=await Promise.all([
+      client.send('Page.getFrameTree'),client.send('DOM.getDocument',{depth:-1,pierce:true})
+    ]);
+    const top={...frameTree?.frame,url:page.url?.()};
+    if(!sameFrame(expectedTop,top)||at!==epoch)throw Error('COMPOSE_FRAME_TOP_CHANGED');
+    const hosts=[],visit=node=>{
+      if(!node)return;
+      const attributes=attrObject(node.attributes);
+      if(composeHostId.test(attributes.id??''))hosts.push(node);
+      for(const child of [...(node.children??[]),...(node.shadowRoots??[])])visit(child);
+    };
+    visit(root);
+    if(hosts.length!==1||attrObject(hosts[0].attributes).id!==editorHostId)throw Error('COMPOSE_FRAME_HOST_AMBIGUOUS');
+    const owners=[],visitOwner=node=>{
+      if(!node)return;
+      if(embeddedDocuments.has(node.nodeName)){owners.push(node);return;}
+      for(const child of [...(node.children??[]),...(node.shadowRoots??[])])visitOwner(child);
+    };
+    visitOwner(hosts[0]);
+    if(owners.length!==1||owners[0].nodeName!=='IFRAME')throw Error('COMPOSE_FRAME_OWNER_AMBIGUOUS');
+    const ownerBackendNodeId=owners[0].backendNodeId;
+    const matching=[];
+    for(const child of frameTree?.childFrames??[]){
+      if(child.frame?.url!=='about:srcdoc')continue;
+      const owner=await client.send('DOM.getFrameOwner',{frameId:child.frame.id});
+      if(owner.backendNodeId===ownerBackendNodeId)matching.push(child.frame);
+    }
+    if(matching.length!==1)throw Error('COMPOSE_FRAME_BINDING_AMBIGUOUS');
+    const frame=matching[0];
+    verifyComposeFrameMetadata(top,frame,composeFrameTopOrigin(top));
+    const world=await client.send('Page.createIsolatedWorld',{frameId:top.id,worldName:'prospectdesk-read-only-compose-editor'});
+    if(!Number.isSafeInteger(world.executionContextId)||world.executionContextId<=0)throw Error('COMPOSE_FRAME_CONTEXT_UNVERIFIED');
+    const contextId=world.executionContextId;
+    const owner=await remoteRead(ownerBackendNodeId,READ_COMPOSE_FRAME_OWNER,contextId);
+    const binding=validateComposeFrameBinding({top,frame,owner,hostId:editorHostId,ownerBackendNodeId});
+    const readBody=async()=>{
+      const read=await remoteRead(ownerBackendNodeId,READ_COMPOSE_FRAME_BODY,contextId);
+      validateComposeFrameBinding({top,frame,owner:read?.owner,hostId:editorHostId,ownerBackendNodeId});
+      const value=read.body;
+      if(typeof value?.html!=='string'||value.html.length>200000||typeof value.innerText!=='string'
+        ||typeof value.textContent!=='string'||!value.innerText.trim())throw Error('COMPOSE_FRAME_BODY_UNVERIFIED');
+      return value;
+    };
+    const body=await readBody();
+    if(JSON.stringify(body)!==JSON.stringify(await readBody()))throw Error('COMPOSE_FRAME_BODY_CHANGED_DURING_READ');
+    const afterTree=(await client.send('Page.getFrameTree')).frameTree;
+    const afterTop={...afterTree?.frame,url:page.url?.()};
+    const afterFrame=(afterTree?.childFrames??[]).find(child=>child.frame?.id===frame.id)?.frame;
+    const afterOwnerId=(await client.send('DOM.getFrameOwner',{frameId:frame.id})).backendNodeId;
+    if(afterOwnerId!==ownerBackendNodeId)throw Error('COMPOSE_FRAME_CHANGED_DURING_READ');
+    const afterOwner=await remoteRead(afterOwnerId,READ_COMPOSE_FRAME_OWNER,contextId);
+    const afterBinding=validateComposeFrameBinding({top:afterTop,frame:afterFrame,owner:afterOwner,
+      hostId:editorHostId,ownerBackendNodeId:afterOwnerId});
+    if(JSON.stringify(binding)!==JSON.stringify(afterBinding)||at!==epoch)throw Error('COMPOSE_FRAME_CHANGED_DURING_READ');
+    await checkIdentity();
+    if(at!==epoch||!sameFrame(expectedTop,await topFrame()))throw Error('COMPOSE_FRAME_TOP_CHANGED');
+    return {source:verifiedFrameSource,editorHostId,binding,
+      snapshot:{html:body.html,innerText:body.innerText,textContent:body.textContent}};
+  };
   return {
     transport:'playwright-cdp',
     frameScope,
+    async readVerifiedComposeFrame({editorHostId}={}) {
+      return await exclusive(()=>readComposeFrame(editorHostId));
+    },
     setMutationGuard(fn){if(fn!==null&&typeof fn!=='function')throw Error('SYNCHRONOUS_MUTATION_GUARD_REQUIRED');guard=fn;},
     async getAXState(){
       return await exclusive(async()=>{

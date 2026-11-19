@@ -35,3 +35,6 @@ profiles/
 /codex/state/
 /codex/state-*/
 /codex/compatibility-repair.json
+
+/codex/repair-v063.json
+/workbuddy/mcp.local.json

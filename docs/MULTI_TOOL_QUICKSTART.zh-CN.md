@@ -1,6 +1,8 @@
 # Codex、Claude、DeepSeek 与 Harness（HAR）使用教程
 
-适用版本：客拓工作台 ProspectDesk v0.6.1。本教程中的 HAR 指 DeepSeek Harness 客户端，按用户确认的名称对应。以下先完成研究与写稿，再说明真实浏览器执行的接入条件；客户端、模型和命令行入口分别说明。
+适用版本：客拓工作台 ProspectDesk v0.6.3。本教程中的 HAR 指 DeepSeek Harness 客户端，按用户确认的名称对应。以下先完成研究与写稿，再说明真实浏览器执行的接入条件；客户端、模型和命令行入口分别说明。
+
+[WorkBuddy 客户端接入](../workbuddy/README.md) · [云电脑、Grok Bot、Muse 与你的 Dot 兼容性](CLIENT_COMPATIBILITY.zh-CN.md)
 
 ## 1. 拉取完整项目，保留资料引用
 

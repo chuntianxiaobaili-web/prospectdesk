@@ -69,6 +69,38 @@ test('core busy and foreign account locks block both preparation and UI probes',
   assert.equal(f.counts.reads,0);await f.service.close();assert.equal(fs.readFileSync(f.options.accountLockPath,'utf8'),owner);
 });
 
+test('retaining sent drafts rejects permanent deletion approval before locking or reading the mailbox',async t=>{
+  const f=fixture();t.after(f.cleanup);
+  await assert.rejects(
+    ()=>f.service.prepare({target:1,retainSentDrafts:true,approvedPermanentDraftIds:['a']}),
+    /RETAIN_SENT_DRAFTS_CONFLICTS_WITH_PERMANENT_DELETE/,
+  );
+  assert.equal(f.counts.reads,0);
+  assert.equal(f.factories.length,0);
+  assert.equal(fs.existsSync(f.options.accountLockPath),false);
+});
+
+test('explicit retention keeps an exact sent residual out of cleaned counts and processes the next verified draft',async t=>{
+  const f=fixture({overrides:{async cleanup(_item,_receipt,{beforeClick}){
+    assert.equal(typeof beforeClick,'function');
+    throw Error('PERMANENT_DRAFT_DELETE_REQUIRES_CURRENT_APPROVAL');
+  }}});t.after(f.cleanup);
+  await f.service.prepare({target:2,retainSentDrafts:true,intervalMs:100,prepareAheadMs:0});
+  f.service.start();
+  const first=await f.service.step();
+  assert.equal(first.phase,'running');
+  assert.equal(first.sent,1);
+  assert.equal(first.retainedOriginalDrafts,1);
+  assert.equal(first.cleaned,0);
+  f.advance(100);
+  const second=await f.service.step();
+  assert.equal(second.phase,'target_reached');
+  assert.equal(second.sent,2);
+  assert.equal(second.retainedOriginalDrafts,2);
+  assert.equal(second.cleaned,0);
+  assert.deepEqual(f.sent,['a','b']);
+});
+
 test('prepare retains the shared account lock and prepared sessions stay busy until finish',async t=>{
   const f=fixture();t.after(f.cleanup);await f.service.prepare({target:1});
   assert.equal(f.service.isBusy(),true);assert.equal(f.service.hasSession(),true);assert.equal(fs.existsSync(f.options.accountLockPath),true);
@@ -103,6 +135,23 @@ test('new sessions do not inherit earlier permanent-delete IDs',async t=>{
   await f.service.prepare({target:1,preparedRefs:[ref('a')]});
   assert.deepEqual(f.factories.map(v=>v.approvedPermanentDraftIds),[['a'],[]]);
   assert.equal(f.service.adapter.approvedPermanentDraftIds.size,0);
+});
+
+test('service passes explicit retention to the fixed runner and reports retained originals honestly',async t=>{
+  const f=fixture({overrides:{async cleanup(){throw Error('PERMANENT_DRAFT_DELETE_REQUIRES_CURRENT_APPROVAL');}}});t.after(f.cleanup);
+  const prepared=await f.service.prepare({target:2,retainSentDrafts:true});
+  assert.equal(prepared.retainSentDrafts,true);assert.equal(f.service.runner.state.config.retainSentDrafts,true);
+  f.service.start();const first=await f.service.step();f.advance(first.waitMs);const second=await f.service.step();
+  assert.equal(second.sent,2);assert.equal(second.cleaned,0);assert.equal(second.cleanupPending,2);
+  assert.equal(second.phase,'target_reached');assert.deepEqual(f.cleaned,[]);
+  const finished=await f.service.finish();assert.equal(finished.archived,true);assert.equal(finished.cleanupPending,2);
+  assert.equal(finished.finalMailboxCount.value,2);
+});
+
+test('service rejects non-boolean retention before acquiring a mailbox lock',async t=>{
+  const f=fixture();t.after(f.cleanup);
+  await assert.rejects(()=>f.service.prepare({retainSentDrafts:'true'}),/RETAIN_SENT_DRAFTS_MUST_BE_BOOLEAN/);
+  assert.equal(f.factories.length,0);assert.equal(fs.existsSync(f.options.accountLockPath),false);
 });
 
 test('foreign-account refs and permanent IDs outside this selection cannot be prepared',async t=>{

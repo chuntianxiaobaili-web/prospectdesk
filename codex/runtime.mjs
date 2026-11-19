@@ -5,8 +5,9 @@ import {setTimeout as delay} from 'node:timers/promises';
 
 import {apply} from '../src/plugin.js';
 import {connectChrome} from '../src/browser-mail/chrome.mjs';
+import {recoverStaleBridgeLocks} from './stale-locks.mjs';
 
-export const bridgeVersion = '0.6.1';
+export const bridgeVersion = '0.6.3';
 const frameScope = 'top-document';
 const bridgeDirectory = path.dirname(fileURLToPath(import.meta.url));
 const allowedTools = new Set([
@@ -21,6 +22,20 @@ const allowedTools = new Set([
 
 function configuredPath(value, fallback) {
   return path.resolve(value || fallback);
+}
+
+function diagnosticUrl(value) {
+  try {
+    const url = new URL(value);
+    if (!['https:', 'http:', 'about:'].includes(url.protocol)) return url.protocol;
+    // Frame URLs can contain session material. Page identity needs only the
+    // origin/path and the mailbox's ordinary route, never query credentials.
+    url.search = '';
+    if (!/^#(?:mail|compose|search)(?:\/|$)/.test(url.hash)) url.hash = '';
+    return url.href;
+  } catch {
+    return String(value ?? '').split(/[?#]/,1)[0].slice(0,1000);
+  }
 }
 
 function installedChromePath(environment) {
@@ -74,6 +89,8 @@ export function createProspectDeskRuntime(options = {}) {
 
     opening = (async () => {
       if (activeRuntime) await activeRuntime.close();
+      await recoverStaleBridgeLocks({dataDirectory:settings.dataDirectory,
+        profileDataDirectory:settings.profileDirectory, executablePath:settings.executablePath});
       fs.mkdirSync(settings.dataDirectory, {recursive: true});
       fs.mkdirSync(settings.profileDirectory, {recursive: true});
 
@@ -136,6 +153,91 @@ export function createProspectDeskRuntime(options = {}) {
             if (!tool) throw new Error(`PROSPECTDESK_TOOL_UNAVAILABLE:${name}`);
             return await tool.execute(args, {signal});
           },
+          async inspectDraft(ref, signal) {
+            if (closed) throw new Error('PROSPECTDESK_RUNTIME_CLOSED');
+            const service = readyServices?.browserMail;
+            if (!service) throw new Error('BROWSER_MAIL_NOT_CONNECTED');
+            if (service.hasSession()) throw new Error('FINISH_BROWSER_SESSION_BEFORE_INSPECTION');
+            if (!ref || ref.accountId !== settings.accountId || !/^\d{10,30}$/.test(ref.draftId || '')
+                || typeof ref.recipient !== 'string' || typeof ref.subject !== 'string')
+              throw new Error('EXACT_DRAFT_REFERENCE_REQUIRED');
+            return await service.withOperation('inspect_existing_draft', signal, async () => {
+              service.acquireLock();
+              try {
+                await service.verifyConnection();
+                const raw = await service.adapterFactory({tab:service.tab, accountId:settings.accountId,
+                  preparedRefs:[ref], approvedPermanentDraftIds:[]});
+                const adapter = service.guardedAdapter(raw);
+                const item = await adapter.inspectDraft(ref);
+                service.assertOperation();
+                await service.verifyConnection();
+                return {readOnly:true, bridgeVersion, accountId:item.accountId,
+                  draftId:item.draftId, recipient:item.recipient, subject:item.subject,
+                  bodyLength:item.body.length, approvedHash:item.approvedHash,
+                  draftVersion:item.draftVersion, bodySerialization:item.bodySerialization || null};
+              } finally { service.releaseLock(); }
+            });
+          },
+          async diagnostics({includeSnapshot = false} = {}, signal) {
+            if (closed) throw new Error('PROSPECTDESK_RUNTIME_CLOSED');
+            const service = readyServices?.browserMail;
+            if (!service) throw new Error('BROWSER_MAIL_NOT_CONNECTED');
+            if (service.status().phase === 'running') throw new Error('DIAGNOSTICS_REQUIRES_STOPPED_SESSION');
+            return await service.withOperation('read_only_diagnostics', signal, async () => {
+              service.coreIdle();
+              const transient = !service.lock;
+              if (transient) service.acquireLock(); else service.assertLock();
+              try {
+                await service.verifyConnection();
+                service.assertOperation();
+                service.assertLock();
+                const initialUrl = connection.page.url();
+                const title = await connection.page.title();
+                const snapshot = await connection.tab.getAXState({emit:false, disableDiffing:true});
+                const frameList = connection.page.frames();
+                const frames = [];
+                for (const frame of frameList) {
+                  const parent = frame.parentFrame();
+                  let owner = null;
+                  if (parent) {
+                    const element = await frame.frameElement();
+                    try {
+                      owner = await element.evaluate(node => {
+                        const rect = node.getBoundingClientRect();
+                        const style = node.ownerDocument.defaultView.getComputedStyle(node);
+                        return {tag:node.tagName, id:node.id || '',
+                          name:node.getAttribute('name'), title:node.getAttribute('title'),
+                          src:node.getAttribute('src'), contenteditable:node.getAttribute('contenteditable'),
+                          role:node.getAttribute('role'), ariaLabel:node.getAttribute('aria-label'),
+                          ariaHidden:node.getAttribute('aria-hidden'),
+                          geometry:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},
+                          display:style.display, visibility:style.visibility,
+                          focused:node.ownerDocument.activeElement === node};
+                      });
+                    } finally { await element.dispose(); }
+                    if (owner.src) owner.src = diagnosticUrl(owner.src);
+                  }
+                  frames.push({url:diagnosticUrl(frame.url()), name:frame.name(),
+                    parentUrl:parent ? diagnosticUrl(parent.url()) : null, owner});
+                }
+                service.assertOperation();
+                service.assertLock();
+                await service.verifyConnection();
+                if (connection.page.url() !== initialUrl) throw new Error('DIAGNOSTIC_PAGE_CHANGED');
+                if (connection.page.frames().length !== frameList.length
+                    || frameList.some(frame => frame.isDetached())) throw new Error('DIAGNOSTIC_FRAME_TREE_CHANGED');
+                const lines = snapshot.split('\n');
+                const editorCandidates = lines.filter(line => /(?:text entry area|text field|container).*(?:编辑区域|contenteditable|editor)/i.test(line))
+                  .map(line => ({signature:line.replace(/,? Value:[\s\S]*$/, '').trim(),
+                    hasFullValue:line.includes('Value:'), firstLineValueLength:line.includes('Value:') ? line.slice(line.indexOf('Value:')+6).length : null}));
+                const sendCandidates = lines.filter(line => /^\s*\d+ button (?:\(disabled\) )?发送\s*$/.test(line)).map(line => line.trim());
+                return {bridgeVersion, frameScope, accountId:settings.accountId,
+                  pageUrl:diagnosticUrl(initialUrl), title, connection:service.connectionStatus(),
+                  editorCandidates, sendCandidates, frames, snapshotLength:snapshot.length,
+                  ...(includeSnapshot ? {topSnapshot:snapshot.slice(0,120000), snapshotTruncated:snapshot.length>120000} : {})};
+              } finally { if (transient) service.releaseLock(); }
+            });
+          },
           summary() {
             return {
               connected: !closed && !connection.page.isClosed(),
@@ -177,6 +279,21 @@ export function createProspectDeskRuntime(options = {}) {
 
   return {
     open,
+    async inspectDraft({draftId, recipient, subject} = {}, signal) {
+      if (!activeRuntime?.summary().connected) throw new Error('BROWSER_MAIL_NOT_CONNECTED');
+      return await activeRuntime.inspectDraft({accountId:settings.accountId, draftId, recipient, subject,
+        created:true, attachments:false}, signal);
+    },
+    async reconnect() {
+      const session = activeRuntime?.summary().session;
+      if (session?.hasSession || session?.busy) throw new Error('FINISH_BROWSER_SESSION_BEFORE_RECONNECT');
+      if (activeRuntime) await activeRuntime.close();
+      return await open();
+    },
+    async diagnostics(args = {}, signal) {
+      if (!activeRuntime?.summary().connected) throw new Error('BROWSER_MAIL_NOT_CONNECTED');
+      return await activeRuntime.diagnostics(args, signal);
+    },
     connectionStatus() {
       return activeRuntime
         ? activeRuntime.summary()

@@ -25,7 +25,7 @@ export function parseRows(state) {
   }
   return rows;
 }
-function parseNamedComposeHeader(header,accountId) {
+function parseNamedComposeHeader(header,accountId,{beforeVerifiedFrameHost=false}={}) {
   const senders=[...header.matchAll(/^[\t ]*\d+ button (\(disabled\) )?From(?: (.*))?$/gm)];
   if(senders.length!==1||senders[0][1]||senders[0][2]!==accountId)
     throw Error('COMPOSE_ACCOUNT_MISMATCH');
@@ -38,7 +38,11 @@ function parseNamedComposeHeader(header,accountId) {
     .filter(row=>!/^container(?:, ID: [^\r\n]+)?$/.test(row??''));
   // The subject mirror and the observed plain editor toolbar follow the address fields.
   const tail=parseControls(trailingHeader);
-  if(tail.length){
+  if(beforeVerifiedFrameHost){
+    // The verified rich editor host begins after the subject mirror. Its
+    // formatting toolbar is not part of the recipient/header allow-list.
+    if(tail.some(row=>row!=='text '+subjects[0][1]))throw Error('COMPOSE_RECIPIENT_LAYOUT_UNVERIFIED');
+  }else if(tail.length){
     const toolbar=tail.indexOf('toolbar 格式选项');
     const subjectMirror='text '+subjects[0][1];
     const editorControls=new Set(['group','button 附件','button 录制音频','button 拼写检查',
@@ -61,12 +65,62 @@ function parseNamedComposeHeader(header,accountId) {
   return {subject:subjects[0][1],addresses:[recipient.toLowerCase()]};
 }
 
-export function parseCompose(state,accountId,ref) {
+// Inputs outside the one verified address header are ambiguous unless they
+// are known formatting controls contained in the editor's format toolbar.
+function unexpectedComposeInput(suffix) {
+  const inputRole=/^(?:listbox|combo box|combobox|text field|text entry area|textbox|searchbox|spinbutton)(?:[ (]|$)/;
+  const formattingInput=/^(?:text field \(settable\) 字体大小, Value: \d{1,3}(?:\.\d{1,2})?|combo box \(collapsed, settable\) Description: (?:字体|字体大小|字体系列))(?:, ID: [^\r\n]+)?$/;
+  let formatDepth=null;
+  for(const line of suffix.split('\n')){
+    const control=/^([\t ]*)\d+ (.*)$/.exec(line);
+    if(!control)continue;
+    const depth=control[1].length,row=control[2];
+    if(formatDepth!==null&&depth<=formatDepth)formatDepth=null;
+    if(/^toolbar 格式选项(?:, ID: [^\r\n]+)?$/.test(row)){formatDepth=depth;continue;}
+    if(inputRole.test(row)&&(formatDepth===null||!formattingInput.test(row)))return true;
+  }
+  return false;
+}
+
+export function parseCompose(state,accountId,ref,{verifiedFrame=null}={}) {
   if(!state.includes(`From ${accountId}`))throw Error('COMPOSE_ACCOUNT_MISMATCH');
   const send=[...state.matchAll(/^\s*(\d+) button 发送\s*$/gm)];
   if(send.length!==1)throw Error('SEND_CONTROL_AMBIGUOUS');
   const addressStart=state.indexOf('text 收件人：');
   const editors=[...state.matchAll(/^\s*\d+ (?:text entry area \(settable\) Description: 纯文本编辑区域|container (?:Description: )?富文本编辑区域)(?:, Value:[^\n]*)?\s*$/gm)];
+  if(verifiedFrame){
+    if(editors.length)throw Error('COMPOSE_EDITOR_AMBIGUOUS');
+    const hosts=[...state.matchAll(/^[\t ]*\d+ container, ID: (zmComposeEditor_Cmp[0-9]+)[\t ]*$/gm)];
+    if(hosts.length!==1||verifiedFrame.source!=='verified-zoho-compose-frame-v1'
+      ||verifiedFrame.editorHostId!==hosts[0][1]||verifiedFrame.binding?.hostId!==hosts[0][1])
+      throw Error('COMPOSE_FRAME_PROOF_REQUIRED');
+    // Header parsing alone cannot prove that another address widget was not
+    // rendered later in the compose. Formatting controls may follow this host,
+    // but every observed To/Cc/Bcc, sender and subject control must occur only
+    // in the one verified header above it.
+    const allControls=state.split('\n').map(line=>/^[\t ]*\d+ (.*)$/.exec(line)?.[1]).filter(Boolean);
+    const countControls=pattern=>allControls.filter(line=>pattern.test(line)).length;
+    const suffix=state.slice(hosts[0].index+hosts[0][0].length);
+    if(countControls(/^button (?:\(disabled\) )?From(?: |$)/)!==1
+      ||countControls(/^text field \(settable\) 主题(?:,|$)/)!==1
+      ||countControls(/^button 选择联系人$/)!==2||countControls(/^listbox 搜索字段$/)!==2
+      ||countControls(/^combo box \([^\n]*\) Description: (?:1被选中|已选择“无”)$/)!==2
+      ||countControls(/^button 添加密件抄送的收件人$/)!==1
+      ||countControls(/^[^\s<>]+@[^\s<>]+$/)!==1
+      ||unexpectedComposeInput(suffix)
+      ||/^[\t ]*\d+ (?:button|text field|combo box|listbox|text) [^\n]*(?:收件人|抄送|\bCc\b|\bBcc\b|\brecipients?\b)/im.test(suffix))
+      throw Error('COMPOSE_RECIPIENT_LAYOUT_UNVERIFIED');
+    const {subject,addresses}=parseNamedComposeHeader(state.slice(0,hosts[0].index),accountId,{beforeVerifiedFrameHost:true});
+    if(addresses.length!==1||addresses[0]!==ref.recipient)throw Error('RECIPIENT_OR_CC_CHANGED');
+    if(subject!==ref.subject)throw Error('SUBJECT_CHANGED');
+    if(ref.attachments)throw Error('ATTACHMENT_REQUIRES_REVIEW');
+    const value=serializeVisiblePlainBody(verifiedFrame.snapshot,verifiedFrame.snapshot?.innerText);
+    const body=value.body,approvedHash=digest({accountId,recipient:addresses[0],subject,body});
+    return {...ref,accountId,recipient:addresses[0],subject,body,approvedHash,draftVersion:approvedHash,
+      sendIndex:Number(send[0][1]),bodySerialization:value.bodySerialization,bodySource:verifiedFrame.source,
+      bodyEvidence:{...value.bodyEvidence,source:verifiedFrame.source,axTextComparison:'not_applicable_frame_bound_dom',
+        frameBinding:structuredClone(verifiedFrame.binding)}};
+  }
   if(editors.length!==1)throw Error('COMPOSE_EDITOR_AMBIGUOUS');
   const bodyMatch=/(?:text entry area \(settable\) Description: 纯文本编辑区域|container (?:Description: )?富文本编辑区域), Value: ([\s\S]*?)(?=\n\t+\d+ |$)/.exec(state);
   if(!bodyMatch)throw Error('COMPOSE_LAYOUT_CHANGED');
@@ -246,10 +300,20 @@ export class BrowserMailAdapter {
     s=await this.waitFor(x=>x.includes(`当前处于文件夹 ${name}，`)&&(parseRows(x).length>0||/此文件夹为空|没有邮件|没有消息/.test(x)),name);
     this.checkAccount(s);return s;
   }
-  async scanDrafts({limit=50}={}) {
+  async scanDrafts({limit=50,excludeDraftIds=[],includeCoverage=false}={}) {
     if(this.preparedRefs)return this.preparedRefs.slice(0,limit);
-    const s=await this.folder('草稿');
-    return parseRows(s).filter(r=>r.created&&r.recipient).slice(0,limit).map(r=>({...r,accountId:this.accountId}));
+    const state=await this.folder('草稿');
+    const rows=parseRows(state).filter(row=>row.created);
+    const excluded=new Set(excludeDraftIds.map(String));
+    const occurrences=new Map();
+    for(const row of rows)occurrences.set(row.draftId,(occurrences.get(row.draftId)??0)+1);
+    const eligible=rows.filter(row=>row.recipient&&!excluded.has(row.draftId)&&occurrences.get(row.draftId)===1);
+    const drafts=eligible.slice(0,limit).map(row=>({...row,accountId:this.accountId}));
+    if(!includeCoverage)return drafts;
+    // The Drafts folder total is a count. It does not prove which rows had
+    // stable identities on this page or whether another page was scanned.
+    return {drafts,coverage:{scope:'visible_draft_page',complete:false,
+      observedRows:rows.length,eligibleDrafts:eligible.length}};
   }
   async collectDraftPage() {
     const s=await this.snapshot();this.checkAccount(s);
@@ -287,6 +351,13 @@ export class BrowserMailAdapter {
     return s;
   }
   async parseComposeSnapshot(state,ref){
+    const completeEditor=/(?:text entry area \(settable\) Description: 纯文本编辑区域|container (?:Description: )?富文本编辑区域), Value:/.test(state);
+    if(!completeEditor&&typeof this.tab.readVerifiedComposeFrame==='function'){
+      const hosts=[...state.matchAll(/^[\t ]*\d+ container, ID: (zmComposeEditor_Cmp[0-9]+)[\t ]*$/gm)];
+      if(hosts.length!==1)throw Error('COMPOSE_FRAME_HOST_AMBIGUOUS');
+      const verifiedFrame=await this.tab.readVerifiedComposeFrame({editorHostId:hosts[0][1]});
+      return parseCompose(state,this.accountId,ref,{verifiedFrame});
+    }
     const item=parseCompose(state,this.accountId,ref);if(!this.readComposeBody)return item;
     const result=await this.readComposeBody({state,item:Object.freeze({...item})});
     if(!result||typeof result.body!=='string'||!result.body.trim()||!['visible-plain-lines-v1','ax-plain-value-v1'].includes(result.bodySerialization))throw Error('VISIBLE_BODY_READER_RESULT_INVALID');
@@ -299,7 +370,12 @@ export class BrowserMailAdapter {
     if(ref.accountId!==this.accountId)throw Error('REF_ACCOUNT_MISMATCH');
     const r=await this.findDraft(ref);if(!r)throw Error('DRAFT_MISSING');
     await this.tab.click(r.index);
-    const s=await this.waitFor(x=>/(?:text entry area \(settable\) Description: 纯文本编辑区域|container (?:Description: )?富文本编辑区域), Value:/.test(x)&&/^\s*\d+ button 发送\s*$/m.test(x),'compose');
+    const s=await this.waitFor(x=>{
+      const completeEditor=/(?:text entry area \(settable\) Description: 纯文本编辑区域|container (?:Description: )?富文本编辑区域), Value:/.test(x);
+      const verifiedFrameCandidate=typeof this.tab.readVerifiedComposeFrame==='function'
+        &&[...x.matchAll(/^[\t ]*\d+ container, ID: (zmComposeEditor_Cmp[0-9]+)[\t ]*$/gm)].length===1;
+      return (completeEditor||verifiedFrameCandidate)&&/^\s*\d+ button 发送\s*$/m.test(x);
+    },'compose');
     return await this.parseComposeSnapshot(s,{...ref,attachments:r.attachments});
   }
   async searchRecipient(recipient) {

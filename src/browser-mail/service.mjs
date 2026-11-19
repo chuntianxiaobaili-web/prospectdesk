@@ -262,7 +262,7 @@ export class BrowserMailService {
     }});
   }
 
-  async prepare({target=50,durationMs=null,intervalMs=72000,prepareAheadMs=60000,
+  async prepare({target=50,durationMs=null,intervalMs=72000,prepareAheadMs=60000,retainSentDrafts=false,
     preparedRefs,excludeDraftIds=[],approvedPermanentDraftIds=[]}={}, {signal}={}){
     const value=await this.withOperation('prepare',signal,async()=>{
       if(this.hasSession())throw Error('FINISH_OR_CLOSE_EXISTING_BROWSER_SESSION');
@@ -270,7 +270,9 @@ export class BrowserMailService {
       if(durationMs!==null&&(!Number.isSafeInteger(durationMs)||durationMs<=0))throw Error('DURATION_MUST_BE_POSITIVE_INTEGER_OR_NULL');
       if(!Number.isFinite(intervalMs)||intervalMs<=0)throw Error('INTERVAL_MUST_BE_POSITIVE');
       if(!Number.isFinite(prepareAheadMs)||prepareAheadMs<0||prepareAheadMs>60000)throw Error('INVALID_PREPARE_AHEAD');
+      if(typeof retainSentDrafts!=='boolean')throw Error('RETAIN_SENT_DRAFTS_MUST_BE_BOOLEAN');
       const permanent=ids(approvedPermanentDraftIds,'PERMANENT_DRAFT_IDS'),excluded=ids(excludeDraftIds,'EXCLUDED_DRAFT_IDS');
+      if(retainSentDrafts&&permanent.length)throw Error('RETAIN_SENT_DRAFTS_CONFLICTS_WITH_PERMANENT_DELETE');
       if(preparedRefs!==undefined&&(!Array.isArray(preparedRefs)||preparedRefs.length>10000
         ||preparedRefs.some(ref=>ref?.accountId!==this.accountId||typeof ref.draftId!=='string'||!ref.draftId)))throw Error('PREPARED_REFS_ACCOUNT_MISMATCH');
       this.acquireLock();
@@ -285,7 +287,7 @@ export class BrowserMailService {
         fs.mkdirSync(this.journalDirectory,{recursive:true});
         const journalPath=path.join(this.journalDirectory,`browser-mail-${Date.now()}-${randomUUID()}.json`);
         this.runner=new MailSessionRunner({...this.runnerOptions,adapter:this.adapter,journalPath,
-          target,durationMs,intervalMs,prepareAheadMs,onRuntimeReminder:this.onRuntimeReminder});this.archived=false;
+          target,durationMs,intervalMs,prepareAheadMs,retainSentDrafts,onRuntimeReminder:this.onRuntimeReminder});this.archived=false;
         this.runner.state.connection=this.connectionStatus();this.runner.state.mailProfile=this.mailProfile;
         await this.runner.initialize({excludeDraftIds:excluded});this.assertOperation();
         const selected=this.runner.state.records.map(r=>r.ref);
@@ -337,11 +339,13 @@ export class BrowserMailService {
       const alreadyAbsent=records.filter(r=>r.cleanup==='already_absent').length;
       const phase=deadline&&s.phase==='running'?'deadline':s.phase;
       result={runId:s.runId,phase,startedAt:s.startedAt,deadlineAt:s.deadlineAt,deadlineReached:deadline,
-        durationMs:s.config.durationMs,timeLimited:s.config.durationMs!==null,runtimeReminder:clone(s.runtimeReminder),
+        durationMs:s.config.durationMs,timeLimited:s.config.durationMs!==null,retainSentDrafts:s.config.retainSentDrafts,runtimeReminder:clone(s.runtimeReminder),
         stopReason:s.stopReason,target:s.config.target,planned:records.length,sent,trashed,alreadyAbsent,cleaned:trashed+alreadyAbsent,
         skipped:records.filter(r=>r.status==='skipped').length,unknown:records.filter(r=>r.status==='unknown').length,
         pending:records.filter(r=>r.status==='pending').length,remainingPlanned:records.length-sent,
         cleanupPending:records.filter(r=>r.status==='sent'&&!['trashed','already_absent'].includes(r.cleanup)).length,
+        retainedOriginalDrafts:records.filter(r=>r.status==='sent'&&r.cleanupReason==='retained_by_send_only_policy').length,
+        scanCoverage:clone(s.scanCoverage??null),
         initialMailboxCount:clone(s.initialMailboxCount),finalMailboxCount:clone(s.finalMailboxCount),
         waitMs:phase==='running'?Math.max(0,this.runner.nextDueMono-now-s.config.prepareAheadMs):0,
         sendWaitMs:phase==='running'?Math.max(0,this.runner.nextDueMono-now):0,

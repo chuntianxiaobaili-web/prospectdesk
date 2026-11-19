@@ -1,6 +1,6 @@
 {
   "name": "@fsarcan/harness-sales-workflow",
-  "version": "0.6.1",
+  "version": "0.6.3",
   "description": "Harness B2B research, approved drafting and browser-mail session workflow",
   "type": "module",
   "main": "./src/plugin.js",
@@ -39,6 +39,8 @@
     "codex/configure.mjs",
     "codex/mcp-server.mjs",
     "codex/runtime.mjs",
+    "codex/stale-locks.mjs",
+    "codex/stale-locks.test.mjs",
     "codex/package.json",
     "codex/package-lock.json",
     "examples",
@@ -51,7 +53,12 @@
     "package-lock.json",
     "DEEPSEEK_WINDOWS_TEST_HANDOFF.md",
     ".gitignore",
-    "SHA256SUMS.json"
+    "SHA256SUMS.json",
+    "workbuddy/README.md",
+    "workbuddy/configure.mjs",
+    "workbuddy/skills/prospectdesk-review/SKILL.md",
+    "workbuddy/stdio.mjs",
+    "workbuddy/verify.mjs"
   ],
   "dependencies": {
     "playwright": "1.64.1"

@@ -58,7 +58,7 @@ export class AtomicJsonJournal {
  */
 export class MailSessionRunner {
   constructor({adapter, durationMs = null, target = 50, intervalMs = 72000,
-    prepareAheadMs = 0, journalPath, store, clock, timers, sleep, onRuntimeReminder = null} = {}) {
+    prepareAheadMs = 0, retainSentDrafts = false, journalPath, store, clock, timers, sleep, onRuntimeReminder = null} = {}) {
     if (!adapter) throw Error('A browser adapter is required');
     for (const name of ['scanDrafts', 'inspectDraft', 'preflight', 'send', 'reconcile', 'cleanup', 'countDrafts']) {
       if (typeof adapter[name] !== 'function') throw Error(`Adapter method missing: ${name}`);
@@ -67,6 +67,7 @@ export class MailSessionRunner {
     if (onRuntimeReminder !== null && typeof onRuntimeReminder !== 'function') throw Error('onRuntimeReminder must be a function or null');
     if (!Number.isInteger(target) || target < 1) throw Error('target must be a positive integer');
     if (!Number.isFinite(intervalMs) || intervalMs <= 0) throw Error('intervalMs must be positive');
+    if (typeof retainSentDrafts !== 'boolean') throw Error('retainSentDrafts must be a boolean');
     if (!Number.isFinite(prepareAheadMs) || prepareAheadMs < 0 || prepareAheadMs > 60000) {
       throw Error('prepareAheadMs must be between zero and 60000 milliseconds');
     }
@@ -101,11 +102,11 @@ export class MailSessionRunner {
     this.nextDueMono = null;
     this.state = {
       formatVersion: 1, kind: 'independent-browser-mail-controller', runId: randomUUID(),
-      phase: 'new', createdAt: this.iso(), config: {durationMs, target, intervalMs, prepareAheadMs},
+      phase: 'new', createdAt: this.iso(), config: {durationMs, target, intervalMs, prepareAheadMs, retainSentDrafts},
       startedAt: null, deadlineAt: null, deadlineReached: false, stopReason: null,
       runtimeReminder: {thresholdMs: RUNTIME_REMINDER_MS, notificationId: null, dueAt: null, continuousStartedAt: null,
         notificationStatus: 'not_due', attemptedAt: null, deliveredAt: null},
-      initialMailboxCount: null, finalMailboxCount: null, records: [], exclusions: [], events: [],
+      scanCoverage: null, initialMailboxCount: null, finalMailboxCount: null, records: [], exclusions: [], events: [],
     };
   }
 
@@ -137,9 +138,10 @@ export class MailSessionRunner {
     if (this.state.phase !== 'new' || this.busy) throw Error('Initialize is available only for a fresh session');
     this.busy = true;
     try {
-      const scanned = await this.adapter.scanDrafts({limit: this.state.config.target});
+      const scanned = await this.adapter.scanDrafts({limit: this.state.config.target, excludeDraftIds, includeCoverage: true});
       const refs = Array.isArray(scanned) ? scanned : scanned?.drafts;
       if (!Array.isArray(refs)) throw Error('scanDrafts must return draft refs or {drafts}');
+      this.state.scanCoverage = copy(scanned.coverage ?? null);
       const seen = new Set();
       const excluded = new Set(excludeDraftIds.map(String));
       for (const reference of refs) {
@@ -153,6 +155,9 @@ export class MailSessionRunner {
         }
         seen.add(key);
         if (this.state.records.length < this.state.config.target) this.state.records.push({ref, status: 'pending', cleanup: 'not_eligible'});
+      }
+      if (this.state.scanCoverage?.complete === false && this.state.records.length < this.state.config.target) {
+        throw Error(`DRAFT_SCAN_TARGET_EXCEEDS_COVERAGE: target=${this.state.config.target}, verified=${this.state.records.length}, scope=${this.state.scanCoverage.scope}`);
       }
       this.state.initialMailboxCount = this.normalizeCount(await this.adapter.countDrafts());
       this.state.phase = 'ready';
@@ -318,6 +323,7 @@ export class MailSessionRunner {
       runId: this.state.runId, phase: this.state.phase, startedAt: this.state.startedAt,
       deadlineAt: this.state.deadlineAt, deadlineReached: this.state.deadlineReached,
       durationMs: this.state.config.durationMs, timeLimited: this.state.config.durationMs !== null,
+      retainSentDrafts: this.state.config.retainSentDrafts,
       runtimeReminder: this.state.runtimeReminder,
       stopReason: this.state.stopReason, target: this.state.config.target, planned: records.length,
       sent, cleaned: trashed + alreadyAbsent, trashed, alreadyAbsent,
@@ -326,6 +332,8 @@ export class MailSessionRunner {
       pending: records.filter(r => r.status === 'pending').length,
       remainingPlanned: records.length - sent,
       cleanupPending: records.filter(r => r.status === 'sent' && !['trashed', 'already_absent'].includes(r.cleanup)).length,
+      retainedOriginalDrafts: records.filter(r => r.status === 'sent' && r.cleanupReason === 'retained_by_send_only_policy').length,
+      scanCoverage: this.state.scanCoverage ?? null,
       initialMailboxCount: this.state.initialMailboxCount, finalMailboxCount: this.state.finalMailboxCount,
       busy: this.busy,
       waitMs: this.state.phase === 'running' ? Math.max(0, this.nextDueMono - this.clock.monotonic() - this.state.config.prepareAheadMs) : 0,
@@ -458,8 +466,20 @@ export class MailSessionRunner {
         } catch (error) {
           record.cleanup = cleanupAuthorized ? 'unknown' : 'pending';
           record.cleanupError = String(error.message ?? error);
+          // This opt-in policy retains the actual original; it never fabricates
+          // absence or grants delete permission. Only an unattempted permission
+          // hold after an exact confirmed send can leave later sends runnable.
+          const retained = this.state.config.retainSentDrafts === true
+            && !cleanupHookCalled && !cleanupAuthorized
+            && record.cleanupError === 'PERMANENT_DRAFT_DELETE_REQUIRES_CURRENT_APPROVAL'
+            && record.status === 'sent' && this.validReceipt(record.receipt, item)
+            && this.state.phase === 'running' && !this.abort.signal.aborted;
+          if (retained) record.cleanupReason = 'retained_by_send_only_policy';
           this.persist('cleanup_pending', {draftId: item.draftId, reason: record.cleanupError});
-          if (!(error instanceof SessionStoppedError)) this.halt('cleanup_unknown', {draftId: item.draftId});
+          if (retained) {
+            this.persist('cleanup_retained', {draftId: item.draftId, sentMessageId: receipt.messageId,
+              reason: record.cleanupReason, originalPreserved: true});
+          } else if (!(error instanceof SessionStoppedError)) this.halt('cleanup_unknown', {draftId: item.draftId});
         }
       } else {
         this.persist('cleanup_deferred', {draftId: item.draftId, reason: this.state.stopReason ?? this.state.phase});

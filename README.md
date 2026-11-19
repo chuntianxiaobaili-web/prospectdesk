@@ -1,9 +1,9 @@
 # 客拓工作台 ProspectDesk
 ### 跨行业客户研究、双语开发信与浏览器邮件执行
 
-**当前版本 v0.6.1 · MIT 许可证**
+**当前版本 v0.6.3 · MIT 许可证**
 
-0.6.1 修复 Codex 中 Zoho 邮箱的浏览器控件识别，加入可独立安装的 Codex 接入。查看[更新与验收说明](docs/RELEASE_V061.zh-CN.md)和[安装教程](codex/README.md)。
+0.6.3 修复 Codex 与 Zoho 的富文本草稿、启动锁恢复、原稿保留和扫描覆盖，并加入 WorkBuddy 只读接入。[更新与验收说明](docs/RELEASE_V063.zh-CN.md) · [客户端与云电脑兼容性](docs/CLIENT_COMPATIBILITY.zh-CN.md) · [Codex](codex/README.md) · [WorkBuddy](workbuddy/README.md)
 
 客拓工作台把客户研究、历史排重、逐客写信、人工审核、浏览器发送、回执核对和原草稿清理串成一条有记录的工作流程。你提供行业、产品或服务资料、目标市场和工作目标，AI负责研究与文案，固定程序负责执行已经批准的邮件。
 

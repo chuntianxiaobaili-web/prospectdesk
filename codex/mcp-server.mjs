@@ -38,14 +38,36 @@ register(
 );
 
 register(
+  'sales_browser_mail_diagnostics',
+  'Read-only diagnostics of the existing connected mailbox page, editor controls and frame owners. Never opens drafts, sends, deletes, or resumes a run. Optional snapshot may include the current visible draft text.',
+  {includeSnapshot:z.boolean().optional().default(false)},
+  (args, signal) => runtime.diagnostics(args, signal)
+);
+
+register(
+  'sales_browser_mail_inspect_draft',
+  'Open and read one exact existing draft through the guarded mailbox adapter. Verifies account, recipient, subject and full body without starting a send run, editing, sending or deleting.',
+  {draftId:z.string().regex(/^\d{10,30}$/), recipient:z.string().email().max(320), subject:z.string().min(1).max(1000)},
+  (args, signal) => runtime.inspectDraft(args, signal)
+);
+
+register(
+  'sales_browser_mail_reconnect',
+  'Close and reopen only the dedicated ProspectDesk Chrome connection using its existing profile. Requires all send runs finished; never sends, edits or deletes messages.',
+  {},
+  () => runtime.reconnect()
+);
+
+register(
   'sales_browser_mail_prepare',
-  'Freeze a verified existing-draft batch without sending. Permanent cleanup IDs must be explicitly approved for this batch.',
+  'Freeze a verified existing-draft batch without sending. Use retainSentDrafts to preserve confirmed originals; it cannot be combined with permanent cleanup IDs.',
   {
     target: z.number().int().min(1).max(10000).optional(),
     durationMs: z.union([z.number().int().min(1), z.null()]).optional(),
     workDuration: z.string().max(100).optional(),
     intervalMs: z.number().int().min(1).max(86400000).optional(),
     prepareAheadMs: z.number().int().min(0).max(60000).optional(),
+    retainSentDrafts: z.boolean().optional(),
     preparedRefsJson: z.string().max(1000000).optional(),
     excludeDraftIdsJson: z.string().max(1000000).optional(),
     approvedPermanentDraftIdsJson: z.string().max(1000000).optional()

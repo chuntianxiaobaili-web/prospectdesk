@@ -1,6 +1,10 @@
-# 客拓工作台 ProspectDesk v0.6.1 · 中文技术手册
+# 客拓工作台 ProspectDesk v0.6.3 · 中文技术手册
 
 产品介绍、功能总览及实发结果见[产品首页](README.md)。当前跨工具接入步骤见[Codex / Claude Code / DeepSeek / Harness教程](docs/MULTI_TOOL_QUICKSTART.zh-CN.md)。
+
+## v0.6.3 Codex 与 WorkBuddy 接入
+
+[0.6.3 发布说明](docs/RELEASE_V063.zh-CN.md) · [客户端与云电脑兼容性](docs/CLIENT_COMPATIBILITY.zh-CN.md)
 
 ## v0.6.1 Codex 接入修复
 

@@ -93,6 +93,19 @@ test('permanent cleanup approval is passed only for current prepare call',async 
   await f.call('browser_mail_stop');await f.call('browser_mail_finish');await f.call('browser_mail_prepare');assert.deepEqual(f.factories[1].approvedPermanentDraftIds,[]);
 });
 
+test('registered prepare exposes and passes an explicit retention flag without deletion authority',async t=>{
+  const f=fixture(t,{overrides:{async cleanup(){throw Error('PERMANENT_DRAFT_DELETE_REQUIRES_CURRENT_APPROVAL');}}});
+  assert.equal(f.registered.get('sales_browser_mail_prepare').parameters.properties.retainSentDrafts.type,'boolean');
+  assert.equal(f.registered.get('sales_browser_mail_prepare_approved_drafts').parameters.properties.retainSentDrafts.type,'boolean');
+  const prepared=await f.call('browser_mail_prepare',{target:2,retainSentDrafts:true});
+  assert.equal(prepared.retainSentDrafts,true);assert.deepEqual(f.factories[0].approvedPermanentDraftIds,[]);
+  await f.call('browser_mail_start');const first=await f.call('browser_mail_step');f.advance(first.waitMs);
+  const final=await f.call('browser_mail_step');assert.equal(final.sent,2);assert.equal(final.cleanupPending,2);
+  assert.equal(final.cleaned,0);assert.equal(final.phase,'target_reached');assert.deepEqual(f.deletes,[]);
+  assert.deepEqual(f.sends.map(s=>s.at),[0,72000]);
+  await f.call('browser_mail_finish');
+});
+
 test('invalid preparation JSON fails before acquiring or scanning mailbox',async t=>{
   const f=fixture(t);await assert.rejects(f.call('browser_mail_prepare',{preparedRefsJson:'{}'}),/bounded JSON array/);
   await assert.rejects(f.call('browser_mail_prepare',{approvedPermanentDraftIdsJson:'['}),SyntaxError);
